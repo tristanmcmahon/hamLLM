@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+/.local/state/gwen/
+/.config/gwen/
