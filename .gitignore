@@ -2,5 +2,6 @@
 __pycache__/
 *.pyc
 .env
-/.local/state/gwen/
-/.config/gwen/
+build/
+dist/
+*.egg-info/

@@ -1,13 +1,16 @@
 [project]
 name = "hamllm"
-version = "0.0.1"
-description = "Minimal Gmail -> Ollama mail bridge"
+version = "0.1.0"
+description = "Small command-line interface for local Ollama models"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
 [project.scripts]
-hamllm = "hamllm.bridge:main"
+hamllm = "hamllm.cli:main"
 
 [build-system]
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

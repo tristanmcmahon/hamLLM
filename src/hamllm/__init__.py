@@ -1,1 +1,3 @@
-__version__ = "0.0.1"
+"""Local Ollama client and command-line interface."""
+
+__version__ = "0.1.0"

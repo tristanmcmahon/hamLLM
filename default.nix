@@ -1,6 +1,15 @@
-{ pkgs ? import <nixpkgs> {} }:
+{ pkgs ? import <nixpkgs> { } }:
 
-pkgs.buildEnv {
-  name = "hamllm-env";
-  paths = [ pkgs.python310 pkgs.python310Packages.requests ];
+pkgs.python3Packages.buildPythonApplication {
+  pname = "hamllm";
+  version = "0.1.0";
+  pyproject = true;
+  src = ./.;
+
+  build-system = with pkgs.python3Packages; [
+    setuptools
+    wheel
+  ];
+
+  pythonImportsCheck = [ "hamllm" ];
 }
