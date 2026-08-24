@@ -1,14 +1,59 @@
 # hamLLM
 
-Minimal Gmail → Ollama mail bridge.
+`hamLLM` is the shared local-AI substrate for Tristan's Ham projects: local Ollama transport, common runtime primitives, and bounded integrations that should not be reimplemented independently in every application.
 
-The Python package lives under `src/hamllm/` and exposes the `hamllm` command via `hamllm.bridge:main`.
+The repository began as a minimal Gmail → Ollama bridge. That bridge remains available, but it is now one integration rather than the definition of the project.
 
-## Repository layout
+## Current surface
 
-- `src/hamllm/` — bridge, Gmail, Ollama, and state handling
-- `scripts/` — helper scripts
-- `tests/` — automated tests
-- `default.nix` — Nix packaging entry point
+- `hamllm` with no arguments — preserves the original mail-bridge behaviour.
+- `hamllm bridge` — runs the mail bridge explicitly.
+- `hamllm chat --model MODEL [PROMPT...]` — direct local Ollama chat, one-shot or interactive.
+- `hamllm.ollama.OllamaClient` — dependency-free `/api/generate` and `/api/chat` transport for local consumers.
+- `hamllm.ollama.call_ollama` — compatibility wrapper for the original bridge.
 
-This repository currently uses `master` as its default branch.
+The Python package lives under `src/hamllm/` and requires only the standard library at runtime.
+
+## Consolidation role
+
+`hamLLM` owns reusable local-model plumbing. It does **not** own application policy.
+
+- **hamGwen** currently remains authoritative for Gwen's agent loop, tool boundaries, approvals, prompts, and behavioural evals. Those capabilities will migrate into `hamLLM` in parity-tested slices; the Gwen name can then survive as a persona/compatibility entry point rather than a separate runtime.
+- **HamSidian** remains a separate vault application with its own strict source/derived-vault security boundary. It may consume a stable `hamLLM` reviewer interface later, but consolidation must not weaken its current local-only contract.
+- **hamSteam**, **hamCintosh**, and **hamKeyDist** remain separate domain tools.
+- **nixos-helix** owns Helix machine configuration and service lifecycle, not application behaviour.
+- **hamBridge** is retired; bridge functionality belongs here.
+
+See [`docs/CONSOLIDATION.md`](docs/CONSOLIDATION.md) for the ownership map and migration rules.
+
+## Usage
+
+The old service contract is intentionally preserved:
+
+```bash
+hamllm
+```
+
+Equivalent explicit form:
+
+```bash
+hamllm bridge
+```
+
+Direct local chat:
+
+```bash
+hamllm chat --model gwen "Summarise this repository"
+hamllm chat --model gwen
+```
+
+Ollama defaults to `http://127.0.0.1:11434`. Override it with `OLLAMA_HOST`, `HAM_OLLAMA_HOST`, or `--host` for the chat command. The legacy bridge continues to accept its existing `HAM_OLLAMA_URL` endpoint.
+
+## Development
+
+```bash
+python -m pytest -q
+python -m compileall -q src tests
+```
+
+The consolidation rule is simple: common local-AI mechanics move inward to `hamLLM`; domain knowledge and safety policy stay with the Ham that actually owns the job.
