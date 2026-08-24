@@ -14,7 +14,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.13"
       - run: python -m pip install -e . pytest
       - run: python -m pytest -q
       - run: python -m compileall -q src tests
+      - run: |
+          hamllm --version
+          hamllm --help
+          hamllm run --help
+          hamllm chat --help
+          hamllm models --help
+          hamllm doctor --help
+          python -m hamllm --version

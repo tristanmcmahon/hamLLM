@@ -1,107 +1,194 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
-from typing import Any, Sequence
+from typing import Sequence
 
-from . import bridge
-from .ollama import DEFAULT_HOST, OllamaClient
+from . import __version__
+from .ollama import DEFAULT_HOST, OllamaClient, OllamaError
+
+DEFAULT_MODEL = "gpt-oss:20b"
+
+
+def _client(args: argparse.Namespace) -> OllamaClient:
+    return OllamaClient(args.host, args.timeout)
+
+
+def _prompt(words: list[str]) -> str:
+    if words:
+        return " ".join(words)
+    if sys.stdin.isatty():
+        raise ValueError("provide a prompt or pipe one on standard input")
+    prompt = sys.stdin.read()
+    if not prompt.strip():
+        raise ValueError("the prompt is empty")
+    return prompt
+
+
+def run_once(args: argparse.Namespace) -> int:
+    prompt = _prompt(args.prompt)
+    response = _client(args).generate(
+        args.model, prompt, args.system, think=args.reasoning
+    )
+    if args.json:
+        print(json.dumps({"model": args.model, "response": response}))
+    else:
+        print(response)
+    return 0
+
+
+def list_models(args: argparse.Namespace) -> int:
+    models = _client(args).models()
+    if args.json:
+        print(json.dumps({"models": models}))
+    elif models:
+        print("\n".join(models))
+    else:
+        print("No Ollama models are installed.")
+    return 0
+
+
+def doctor(args: argparse.Namespace) -> int:
+    client = _client(args)
+    try:
+        version = client.version()
+        models = client.models()
+    except OllamaError as exc:
+        payload = {
+            "healthy": False,
+            "host": args.host,
+            "model": args.model,
+            "error": str(exc),
+        }
+        if args.json:
+            print(json.dumps(payload))
+        else:
+            print(f"FAIL  {exc}")
+        return 1
+
+    healthy = args.model in models
+    payload = {
+        "healthy": healthy,
+        "host": args.host,
+        "ollama_version": version,
+        "model": args.model,
+        "model_installed": healthy,
+        "models": models,
+    }
+    if args.json:
+        print(json.dumps(payload))
+    else:
+        print(f"PASS  Ollama {version} at {args.host}")
+        state = "PASS" if healthy else "FAIL"
+        detail = "installed" if healthy else "not installed"
+        print(f"{state}  {args.model}: {detail}")
+    return 0 if healthy else 1
+
+
+def chat(args: argparse.Namespace) -> int:
+    client = _client(args)
+    messages: list[dict[str, str]] = []
+    if args.system:
+        messages.append({"role": "system", "content": args.system})
+    model = args.model
+    print(f"hamLLM {__version__} — {model} ({args.host})")
+    print("/clear resets context; /model NAME switches model; /exit quits.")
+    while True:
+        try:
+            line = input("you> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+        if not line:
+            continue
+        if line in {"/exit", "/quit"}:
+            return 0
+        if line == "/clear":
+            messages = [item for item in messages if item["role"] == "system"]
+            print("Context cleared.")
+            continue
+        if line.startswith("/model "):
+            candidate = line.removeprefix("/model ").strip()
+            if not candidate:
+                print("Model name is empty.", file=sys.stderr)
+                continue
+            model = candidate
+            messages = [item for item in messages if item["role"] == "system"]
+            print(f"Using {model}; context cleared.")
+            continue
+        messages.append({"role": "user", "content": line})
+        try:
+            response = client.chat_content(model, messages, think=args.reasoning)
+        except OllamaError:
+            messages.pop()
+            raise
+        messages.append({"role": "assistant", "content": response})
+        print(f"{model}> {response}")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="hamllm",
-        description="Local Ollama runtime and bounded integration layer.",
+        prog="hamllm", description="Run and inspect local Ollama models"
     )
-    subparsers = parser.add_subparsers(dest="command")
-
-    subparsers.add_parser("bridge", help="Run the legacy Gmail task bridge.")
-
-    chat = subparsers.add_parser("chat", help="Chat directly with a local Ollama model.")
-    chat.add_argument(
-        "--model",
-        default=os.environ.get("HAM_MODEL", "gwen"),
-        help="Ollama model name (default: HAM_MODEL or gwen).",
-    )
-    chat.add_argument(
+    parser.add_argument("--version", action="version", version=f"hamLLM {__version__}")
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
         "--host",
-        default=os.environ.get("OLLAMA_HOST") or os.environ.get("HAM_OLLAMA_HOST") or DEFAULT_HOST,
-        help="Ollama host URL.",
+        default=(
+            os.environ.get("HAMLLM_HOST")
+            or os.environ.get("OLLAMA_HOST")
+            or DEFAULT_HOST
+        ),
     )
-    chat.add_argument("--timeout", type=float, default=300.0, help="Request timeout in seconds.")
-    chat.add_argument(
+    common.add_argument(
+        "--model", default=os.environ.get("HAMLLM_MODEL", DEFAULT_MODEL)
+    )
+    common.add_argument(
+        "--timeout",
+        type=float,
+        default=float(os.environ.get("HAMLLM_TIMEOUT", "300")),
+    )
+    common.add_argument(
         "--reasoning",
         choices=("low", "medium", "high"),
         default=None,
-        help="Optional Ollama reasoning level.",
+        help="optional Ollama reasoning level",
     )
-    chat.add_argument("prompt", nargs="*", help="One-shot prompt. Omit for interactive chat.")
+
+    commands = parser.add_subparsers(dest="command", required=True)
+    run = commands.add_parser("run", parents=[common], help="run one prompt")
+    run.add_argument("prompt", nargs="*")
+    run.add_argument("--system")
+    run.add_argument("--json", action="store_true")
+    run.set_defaults(handler=run_once)
+
+    interactive = commands.add_parser(
+        "chat", parents=[common], help="start an interactive local chat"
+    )
+    interactive.add_argument("--system")
+    interactive.set_defaults(handler=chat)
+
+    models = commands.add_parser(
+        "models", parents=[common], help="list installed Ollama models"
+    )
+    models.add_argument("--json", action="store_true")
+    models.set_defaults(handler=list_models)
+
+    check = commands.add_parser(
+        "doctor", parents=[common], help="check Ollama and the selected model"
+    )
+    check.add_argument("--json", action="store_true")
+    check.set_defaults(handler=doctor)
     return parser
 
 
-def _message_content(response: dict[str, Any]) -> str:
-    message = response.get("message")
-    if not isinstance(message, dict):
-        raise RuntimeError("Ollama response did not contain a message")
-    content = message.get("content", "")
-    return content if isinstance(content, str) else str(content)
-
-
-def _run_chat(args: argparse.Namespace) -> int:
-    client = OllamaClient(host=args.host, timeout=args.timeout)
-    messages: list[dict[str, Any]] = []
-
-    if args.prompt:
-        prompt = " ".join(args.prompt)
-        messages.append({"role": "user", "content": prompt})
-        response = client.chat(args.model, messages, think=args.reasoning)
-        answer = _message_content(response)
-        if answer:
-            print(answer)
-        return 0
-
-    while True:
-        try:
-            prompt = input(">>> ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return 0
-
-        if not prompt:
-            continue
-        if prompt in {"/bye", "/exit", "/quit"}:
-            return 0
-
-        messages.append({"role": "user", "content": prompt})
-        response = client.chat(args.model, messages, think=args.reasoning)
-        assistant_message = {
-            "role": "assistant",
-            "content": _message_content(response),
-        }
-        messages.append(assistant_message)
-        if assistant_message["content"]:
-            print(assistant_message["content"])
-
-
 def main(argv: Sequence[str] | None = None) -> int:
-    args_list = list(sys.argv[1:] if argv is None else argv)
-
-    # Preserve the original service contract: bare `hamllm` still runs the mail bridge.
-    if not args_list:
-        return bridge.main([])
-
     parser = build_parser()
-    args = parser.parse_args(args_list)
-
-    if args.command == "bridge":
-        return bridge.main([])
-    if args.command == "chat":
-        return _run_chat(args)
-
-    parser.print_help()
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    args = parser.parse_args(argv)
+    try:
+        return args.handler(args)
+    except (OllamaError, ValueError) as exc:
+        parser.error(str(exc))
+    return 2
