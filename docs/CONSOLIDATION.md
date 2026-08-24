@@ -1,90 +1,52 @@
 # Ham consolidation
 
-This document defines the repository ownership model for the current Ham family. The goal is fewer duplicated runtimes without turning unrelated applications into one monolith.
-
-## Rule
-
-A Ham survives as a repository when it owns a durable domain job. Reusable local-AI transport/runtime mechanics belong in `hamLLM`. Helix machine configuration and service lifecycle belong in `nixos-helix`.
+The goal is fewer duplicated runtimes without turning unrelated applications into one monolith.
 
 ## Ownership map
 
 | Repository | Decision | Durable responsibility |
 | --- | --- | --- |
-| `hamLLM` | **Anchor / expand** | Shared local Ollama transport, runtime primitives, common bounded integration surfaces |
-| `hamGwen` | **Migrate, then compatibility/archive** | Today: Gwen agent/tool runtime. End state: Gwen persona/config/evals on top of `hamLLM`, with no duplicated core runtime |
-| `hamBridge` | **Retire** | No independent responsibility; bridge functionality lives in `hamLLM` |
-| `HamSidian` | **Keep separate** | Read-only-source Obsidian analysis, derived-vault publication, semantic-navigation policy and safety contract |
+| `hamLLM` | **Anchor / expand** | Local Ollama CLI, shared transport, bounded agent-runtime primitives |
+| `hamGwen` | **Thin compatibility/persona layer** | Gwen tools, approval previews, prompts, policy and behavioural evals over `hamLLM` |
+| `hamBridge` | **Retire** | Tombstone only; the old mail bridge is not retained |
+| `HamSidian` | **Keep separate** | Read-only-source Obsidian analysis, local semantic review, derived-vault publication and safety contract |
 | `hamSteam` | **Keep separate** | Steam-library ranking, capacity policy, placement and supported-client actions |
 | `hamCintosh` | **Keep separate** | Conservative Apple Silicon user-environment bootstrap |
 | `hamKeyDist` | **Keep separate** | Home-LAN SSH public-key distribution and removal |
-| `nixos-helix` | **Keep separate infrastructure** | Helix NixOS configuration, mounts, packages, user services/timers and machine integration |
-
-Non-Ham domain tools such as `tfpga` remain outside this consolidation unless they independently duplicate one of these responsibilities.
+| `nixos-helix` | **Keep separate infrastructure** | Helix NixOS configuration, mounts, packages, services/timers and machine integration |
 
 ## Invariants
 
-1. **Domain policy stays with the domain application.** `hamLLM` must not learn Steam ranking policy, Obsidian publication rules, SSH topology, or macOS bootstrap policy.
-2. **Machine lifecycle stays in NixOS.** If a Ham supplies a steady-state program on Helix, `nixos-helix` owns the declarative user service/timer that runs it.
-3. **Local-model mechanics converge.** Ollama HTTP handling, common chat/generate transport, reusable agent-loop primitives, and shared model/runtime inspection should not be independently reimplemented.
-4. **Security boundaries may only become stricter during migration.** Gwen's approval gates and HamSidian's source-vault protections are migration requirements, not optional cleanup targets.
-5. **Compatibility beats flag day.** Existing commands stay available until parity tests prove their replacement.
-6. **A tombstone is better than a zombie.** Once a repository has no independent responsibility, its README should point to the surviving owner and it should stop accepting new implementation work.
+1. Domain policy stays with the domain application.
+2. Helix machine lifecycle belongs in `nixos-helix`, not application repositories.
+3. Local-model mechanics converge in `hamLLM`.
+4. Security boundaries may only become stricter during migration.
+5. A retired responsibility is removed or tombstoned rather than kept alive as compatibility baggage.
+6. Existing application behaviour is migrated only when parity tests prove the shared replacement.
 
-## Gwen migration sequence
+## Completed local-AI slices
 
-Gwen contains the largest body of reusable local-agent work, so it moves in slices.
+### Local-only transport and CLI
 
-### 1. Transport and CLI foundation — this branch
+`hamLLM` owns dependency-free Ollama transport plus `run`, `chat`, `models`, and `doctor`. The historical Gmail/OAuth/mail-poller implementation is removed rather than preserved as a second integration path.
 
-- replace `hamLLM`'s one-off `requests` Ollama call with a standard-library transport;
-- support both `/api/generate` and `/api/chat`;
-- preserve bare `hamllm` as the legacy bridge invocation;
-- add explicit `hamllm bridge` and direct `hamllm chat` surfaces;
-- put CI around the package before moving richer code.
+### Bounded agent core
 
-### 2. Agent core
-
-Move Gwen's model-independent conversation/tool loop into `hamLLM` without changing its behavioural contract:
+`hamLLM.agent.AgentRuntime` owns model-independent orchestration:
 
 - bounded tool rounds;
-- duplicate-call suppression;
-- tool-result evidence rules;
-- deterministic final-response policy;
-- clear exhausted-budget reporting.
+- duplicate observation/mutation/execution suppression;
+- default-deny approval handling;
+- state-change cache invalidation;
+- deterministic response-policy rewriting;
+- evidence-aware final synthesis when the tool budget is exhausted.
 
-Gwen's existing behavioural evals are the acceptance tests.
+### Gwen adapter
 
-### 3. Tool registry and approvals
+Gwen consumes the shared core through a pinned `hamLLM` submodule. Gwen continues to own its concrete workspace/Git/process/service tools, approval previews, destructive-command response policy, prompts and evals.
 
-Move reusable workspace/Git/process/service tooling behind explicit registries. Preserve:
+## Next possible slice
 
-- default-deny mutation behaviour;
-- human approval previews;
-- exact-path Git staging/commit boundaries;
-- destructive-action resistance;
-- no arbitrary shell surface.
+Reusable tool implementations may move into `hamLLM` only where they can be parameterised without weakening Gwen's boundaries. Application-specific tools remain with Gwen.
 
-Application-specific tools remain with their owning application unless proven generic.
-
-### 4. Gwen compatibility surface
-
-Once parity is demonstrated:
-
-- keep the `gwen` model/persona/config name;
-- provide a compatibility command for existing Gwen workflows;
-- stop adding runtime code to the standalone `hamGwen` repository;
-- archive/tombstone `hamGwen` only after its live eval suite passes against `hamLLM`.
-
-### 5. Consumers
-
-Only after the shared interface is stable should consumers opt in. HamSidian in particular must retain its local-only, read-only-source reviewer contract; moving its reviewer plumbing is not required merely to declare consolidation complete.
-
-## Completion criteria
-
-The local-AI consolidation is complete when:
-
-- `hamBridge` contains only a retirement pointer;
-- `hamGwen` contains no unique agent/runtime implementation, only compatibility/persona material or an archive pointer;
-- Gwen behavioural evals pass against the `hamLLM` implementation;
-- `HamSidian`, `hamSteam`, `hamCintosh`, and `hamKeyDist` remain independently understandable from their own READMEs;
-- `nixos-helix` remains the only owner of Helix service lifecycle configuration.
+HamSidian is not a mandatory consumer: its OpenClaw reviewer and source-vault protections are a distinct security boundary and should remain separate unless a later migration produces a clear safety or maintenance benefit.
