@@ -11,6 +11,8 @@ The repository began as a minimal Gmail → Ollama bridge. That bridge remains a
 - `hamllm chat --model MODEL [PROMPT...]` — direct local Ollama chat, one-shot or interactive.
 - `hamllm.ollama.OllamaClient` — dependency-free `/api/generate` and `/api/chat` transport for local consumers.
 - `hamllm.ollama.call_ollama` — compatibility wrapper for the original bridge.
+- `hamllm.agent.AgentRuntime` — reusable bounded tool loop with default-deny approvals, duplicate-call suppression, budget-aware synthesis, and injectable deterministic response policy.
+- `hamllm.agent.ToolRegistry` — adapter boundary that lets applications retain their own tool implementations and security policy.
 
 The Python package lives under `src/hamllm/` and requires only the standard library at runtime.
 
@@ -18,7 +20,7 @@ The Python package lives under `src/hamllm/` and requires only the standard libr
 
 `hamLLM` owns reusable local-model plumbing. It does **not** own application policy.
 
-- **hamGwen** currently remains authoritative for Gwen's agent loop, tool boundaries, approvals, prompts, and behavioural evals. Those capabilities will migrate into `hamLLM` in parity-tested slices; the Gwen name can then survive as a persona/compatibility entry point rather than a separate runtime.
+- **hamGwen** currently remains authoritative for Gwen's tool implementations, approval previews, prompts, destructive-response policy, and behavioural evals. Its generic agent-loop mechanics are migrating into `hamLLM` in parity-tested slices; the Gwen name can then survive as a persona/compatibility entry point rather than a separate runtime.
 - **HamSidian** remains a separate vault application with its own strict source/derived-vault security boundary. It may consume a stable `hamLLM` reviewer interface later, but consolidation must not weaken its current local-only contract.
 - **hamSteam**, **hamCintosh**, and **hamKeyDist** remain separate domain tools.
 - **nixos-helix** owns Helix machine configuration and service lifecycle, not application behaviour.
