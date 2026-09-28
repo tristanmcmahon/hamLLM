@@ -41,7 +41,7 @@ Configuration:
 - `hamllm.agent.AgentRuntime` — bounded tool loop with duplicate-call suppression, default-deny approvals, state-change cache invalidation, budget-aware synthesis, and injectable deterministic response policy.
 - `hamllm.agent.ToolRegistry` — adapter boundary that lets applications retain their own tools and security policy.
 
-`hamGwen` consumes the shared agent core while keeping Gwen-specific tools, approval previews, prompts, destructive-response policy, and behavioural evals. `HamSidian` remains separate because its semantic reviewer has its own read-only-source and deterministic-verification boundary.
+`hamGwen` consumes the shared agent core and Ollama transport while keeping Gwen-specific tools, approval previews, prompts, destructive-response policy, and behavioural evals. Helix packages a pinned snapshot of this CLI for its development profile; editors connect to Ollama directly. `HamSidian` remains separate because its semantic reviewer has its own read-only-source and deterministic-verification boundary.
 
 See [`docs/CONSOLIDATION.md`](docs/CONSOLIDATION.md) for the repository ownership model.
 
