@@ -43,7 +43,16 @@ The goal is fewer duplicated runtimes without turning unrelated applications int
 
 ### Gwen adapter
 
-Gwen consumes the shared core through a pinned `hamLLM` submodule. Gwen continues to own its concrete workspace/Git/process/service tools, approval previews, destructive-command response policy, prompts and evals.
+Gwen consumes the shared agent core and Ollama transport through a pinned
+`hamLLM` submodule. Gwen continues to own its concrete workspace/Git/process/service
+tools, approval previews, destructive-command response policy, prompts and evals.
+
+### Helix package adapter
+
+`nixos-helix` packages a provenance-labelled hamLLM source snapshot for its
+development profile. It does not own hamLLM behaviour. The editor clients use
+Helix's loopback Ollama service directly; hamLLM does not proxy their traffic.
+The running model list and GPU use must be checked on Helix after activation.
 
 ## Next possible slice
 
