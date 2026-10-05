@@ -87,6 +87,43 @@ def doctor(args: argparse.Namespace) -> int:
     return 0 if healthy else 1
 
 
+def evaluate(args: argparse.Namespace) -> int:
+    from . import evals
+
+    client = _client(args)
+    installed = client.models()
+    if args.model not in installed:
+        raise ValueError(f"model {args.model!r} is not installed; run `hamllm models`")
+    cases = [c for c in evals.CASES if not args.category or c.category in args.category]
+    if not cases:
+        raise ValueError(f"no cases match; categories: {', '.join(evals.CATEGORIES)}")
+
+    def show(summary: evals.CaseSummary) -> None:
+        passed = sum(r.passed for r in summary.runs)
+        state = "PASS" if summary.pass_rate >= args.threshold else "FAIL"
+        print(
+            f"{state}  {summary.case.category}/{summary.case.name}  "
+            f"{passed}/{len(summary.runs)}  {summary.median_seconds:.1f}s",
+            file=sys.stderr if args.json else sys.stdout,
+        )
+        for run in summary.runs:
+            if not run.passed:
+                print(f"      {run.reason}", file=sys.stderr if args.json else sys.stdout)
+
+    summaries = evals.run_suite(
+        client, args.model, cases=cases, repeats=args.repeats,
+        reasoning=args.reasoning, on_result=show,
+    )
+    result = evals.report(args.model, summaries, args.threshold)
+    if args.json:
+        print(json.dumps(result))
+    else:
+        for category, rate in result["categories"].items():
+            print(f"{category:12} {rate:.0%}")
+        print("READY" if result["ready"] else "NOT READY", f"({args.model}, threshold {args.threshold:.0%})")
+    return 0 if result["ready"] else 1
+
+
 def chat(args: argparse.Namespace) -> int:
     client = _client(args)
     messages: list[dict[str, str]] = []
@@ -181,6 +218,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     check.add_argument("--json", action="store_true")
     check.set_defaults(handler=doctor)
+
+    probe = commands.add_parser(
+        "eval", parents=[common], help="test whether the model can field real requests"
+    )
+    probe.add_argument("--repeats", type=int, default=1, help="runs per case")
+    probe.add_argument("--threshold", type=float, default=0.8, help="min pass rate per category")
+    probe.add_argument("--category", action="append", help="limit to a category (repeatable)")
+    probe.add_argument("--json", action="store_true")
+    probe.set_defaults(handler=evaluate)
     return parser
 
 

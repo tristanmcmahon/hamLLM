@@ -25,4 +25,5 @@ jobs:
           hamllm chat --help
           hamllm models --help
           hamllm doctor --help
+          hamllm eval --help
           python -m hamllm --version

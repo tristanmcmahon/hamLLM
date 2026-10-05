@@ -17,6 +17,7 @@ hamllm doctor
 hamllm models
 hamllm run "Explain this shell error"
 hamllm chat
+hamllm eval --repeats 3
 ```
 
 The default model is `gpt-oss:20b`. Choose any installed Ollama tag with `--model` or `HAMLLM_MODEL`:
@@ -33,7 +34,7 @@ Configuration:
 - `HAMLLM_TIMEOUT` — request timeout in seconds
 - `--reasoning low|medium|high` — optional Ollama reasoning level for `run` and `chat`
 
-`run` accepts a prompt on standard input and supports `--json`. `models` and `doctor` support `--json`. Interactive chat understands `/clear`, `/model NAME`, and `/exit`.
+`run` accepts a prompt on standard input and supports `--json`. `models` and `doctor` support `--json`. `eval` runs a capability suite against the model (see [`docs/INTEGRATION.md`](docs/INTEGRATION.md)). Interactive chat understands `/clear`, `/model NAME`, and `/exit`.
 
 ## Shared runtime API
 
@@ -63,5 +64,6 @@ nix-build
 python3 -m compileall -q src tests
 python3 -m pip install -e . pytest
 python3 -m pytest -q
+HAMLLM_LIVE=1 python3 -m pytest tests/test_live_models.py -v   # needs a running Ollama
 hamllm --help
 ```
