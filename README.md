@@ -1,8 +1,13 @@
 # hamLLM
 
-`hamLLM` is the shared local-AI substrate for the Ham projects: a small local-only Ollama CLI plus reusable transport and bounded agent-runtime primitives.
+`hamLLM` is the capability and policy layer in front of local Ollama models for the Ham projects. Ollama runs the models; hamLLM answers the questions Ollama doesn't:
 
-It does **not** read or send email, run a mail poller, or require Gmail credentials. The pre-0.1 mail bridge is retired.
+- **What can each local model actually do?** `hamllm eval` drives a real model through a bounded agent loop against an in-memory sandbox and scores the transcript deterministically.
+- **Which model should a client use?** Aliases (`fast`, `tools`, `code`) resolve to the best installed model that *passed* the relevant eval categories.
+- **How do Zed, Claude Code and Codex offload work to local models?** `hamllm mcp` is a read-only stdio MCP server in front of all of it.
+- **How do apps run a local model safely?** `hamllm.agent` is the shared bounded tool runtime (default-deny approvals, duplicate suppression, response policy).
+
+It does **not** read or send email, run a mail poller, or need Gmail credentials; the pre-0.1 mail bridge is retired. It is also not a chat client: use `ollama run` for that.
 
 If an old `hamllm-bridge` user service is still loaded on a machine, stop it with:
 
@@ -10,60 +15,78 @@ If an old `hamllm-bridge` user service is still loaded on a machine, stop it wit
 systemctl --user mask --now hamllm-bridge-timer.timer hamllm-bridge.service
 ```
 
-## CLI
+## Quick start
 
 ```bash
-hamllm doctor
-hamllm models
-hamllm run "Explain this shell error"
-hamllm chat
-hamllm eval --repeats 3
+hamllm doctor                              # Ollama reachable, model installed?
+hamllm eval --save --repeats 3             # profile the default model (full suite)
+hamllm eval --save --repeats 3 --model qwen3.6:27b
+hamllm resolve code                        # which installed model is trusted for coding work?
+hamllm run --model fast "Summarise: ..."   # one-shot generation; --model accepts aliases
+hamllm mcp                                 # serve local models to MCP clients over stdio
 ```
 
-The default model is `gpt-oss:20b`. Choose any installed Ollama tag with `--model` or `HAMLLM_MODEL`:
+## Evals and profiles
+
+`hamllm eval` runs 11 cases in six categories: `basic`, `instruction`, `tools`, `safety`, `coding`, `context`. It exits 1 unless every category clears `--threshold` (default 80%). `--save` stores the result as that model's profile in `$HAMLLM_STATE_DIR` (default `~/.local/state/hamllm/profiles.json`).
+
+Aliases name the categories a model must have passed:
+
+| Alias | Requires | Use for |
+| --- | --- | --- |
+| `default` | nothing (`HAMLLM_MODEL`) | whatever you configured |
+| `fast` | basic, instruction | summaries, classification, formatting |
+| `tools` | tools, safety | tool-calling agents |
+| `code` | tools, safety, coding | edit-and-verify work |
+
+An alias never resolves to an unprofiled model or one that failed. Ties go to the higher score, then the faster model. A plain model tag always resolves to itself.
+
+The same cases run as pytest tests: `HAMLLM_LIVE=1 python -m pytest tests/test_live_models.py -v`.
+
+## MCP server (`hamllm mcp`)
+
+Standard-library stdio server, read-only: `ask_local(prompt, system?, model?, max_tokens?)` and `local_models()`. Every call sets a deliberate context window (`num_ctx`), an output cap and `keep_alive`, so clients cannot thrash VRAM or hold the GPU. Failures come back as tool errors, so the calling model can fall back.
 
 ```bash
-hamllm run --model qwen3.6:27b "Review this plan"
-HAMLLM_MODEL=gpt-oss:20b hamllm chat
+claude mcp add hamllm -- hamllm mcp                 # Claude Code
+```
+```toml
+# Codex: ~/.codex/config.toml
+[mcp_servers.hamllm]
+command = "hamllm"
+args = ["mcp"]
+```
+```jsonc
+// Zed: settings.json (check current Zed docs for the exact key)
+"context_servers": { "hamllm": { "command": "hamllm", "args": ["mcp"] } }
 ```
 
-Configuration:
+Offloading is not privacy: the prompt comes from the calling client and the answer returns to it.
 
-- `HAMLLM_HOST` — Ollama base URL (default `http://127.0.0.1:11434`; `OLLAMA_HOST` is also accepted)
-- `HAMLLM_MODEL` — default installed model tag
-- `HAMLLM_TIMEOUT` — request timeout in seconds
-- `--reasoning low|medium|high` — optional Ollama reasoning level for `run` and `chat`
+## Configuration
 
-`run` accepts a prompt on standard input and supports `--json`. `models` and `doctor` support `--json`. `eval` runs a capability suite against the model (see [`docs/INTEGRATION.md`](docs/INTEGRATION.md)). Interactive chat understands `/clear`, `/model NAME`, and `/exit`.
+- `HAMLLM_HOST` — Ollama base URL (default `http://127.0.0.1:11434`; `OLLAMA_HOST` also accepted)
+- `HAMLLM_MODEL` — what `default` means (default `gpt-oss:20b`)
+- `HAMLLM_NUM_CTX` — context window in tokens (default 16384; Ollama's own 4096 silently truncates)
+- `HAMLLM_KEEP_ALIVE` — how long Ollama keeps a model loaded (default `30m`)
+- `HAMLLM_TIMEOUT` / `HAMLLM_MCP_TIMEOUT` — request timeouts in seconds (300 / 120)
+- `HAMLLM_STATE_DIR` — where profiles live
+- `--reasoning low|medium|high` — optional Ollama reasoning level
 
-## Shared runtime API
+## Library API
 
-- `hamllm.ollama.OllamaClient` — dependency-free local Ollama transport, model discovery, version checks, generate/chat calls.
-- `hamllm.agent.AgentRuntime` — bounded tool loop with duplicate-call suppression, default-deny approvals, state-change cache invalidation, budget-aware synthesis, and injectable deterministic response policy.
-- `hamllm.agent.ToolRegistry` — adapter boundary that lets applications retain their own tools and security policy.
+- `hamllm.ollama.OllamaClient` — dependency-free transport: `generate`, `chat`, model discovery, `options`, `keep_alive`.
+- `hamllm.agent.AgentRuntime` / `ToolRegistry` — bounded tool loop and the adapter boundary that lets applications keep their own tools and security policy.
+- `hamllm.profiles` — profile store and alias resolution.
+- `hamllm.evals` — the capability suite.
 
-`hamGwen` consumes the shared agent core and Ollama transport while keeping Gwen-specific tools, approval previews, prompts, destructive-response policy, and behavioural evals. Helix packages a pinned snapshot of this CLI for its development profile; editors connect to Ollama directly. `HamSidian` remains separate because its semantic reviewer has its own read-only-source and deterministic-verification boundary.
+`hamGwen` consumes the agent core and transport while keeping its own tools, approval previews, prompts and policy. Helix packages a pinned snapshot of this CLI. `HamSidian` stays separate. See [`docs/CONSOLIDATION.md`](docs/CONSOLIDATION.md) and [`docs/INTEGRATION.md`](docs/INTEGRATION.md).
 
-See [`docs/CONSOLIDATION.md`](docs/CONSOLIDATION.md) for the repository ownership model.
-
-## Install
-
-```bash
-python3 -m pip install .
-```
-
-Or build with Nix:
+## Install and develop
 
 ```bash
-nix-build
-```
-
-## Development
-
-```bash
+python3 -m pip install .          # or: nix-build
 python3 -m compileall -q src tests
 python3 -m pip install -e . pytest
 python3 -m pytest -q
-HAMLLM_LIVE=1 python3 -m pytest tests/test_live_models.py -v   # needs a running Ollama
-hamllm --help
 ```

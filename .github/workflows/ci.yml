@@ -22,8 +22,13 @@ jobs:
           hamllm --version
           hamllm --help
           hamllm run --help
-          hamllm chat --help
           hamllm models --help
           hamllm doctor --help
           hamllm eval --help
+          hamllm resolve --help
+          hamllm mcp --help
           python -m hamllm --version
+      - name: MCP stdio smoke test
+        run: |
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+            | hamllm mcp | python -c "import json,sys; r=[json.loads(l) for l in sys.stdin]; assert [x['id'] for x in r]==[1,2], r; print('ok')"

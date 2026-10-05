@@ -17,7 +17,8 @@ class ScriptedClient:
     def __init__(self, *responses):
         self.responses = list(responses)
 
-    def chat(self, model, messages, *, tools=None, think=None):
+    def chat(self, model, messages, **kwargs):
+        self.kwargs = kwargs
         return self.responses.pop(0)
 
 
@@ -142,13 +143,13 @@ def test_verdict_requires_every_category_to_clear_threshold():
 def test_cli_eval_exit_code_and_json(monkeypatch, capsys):
     monkeypatch.setattr("hamllm.cli.OllamaClient.models", lambda self: ["m"])
     monkeypatch.setattr("hamllm.cli.OllamaClient.chat",
-                        lambda self, model, messages, *, tools=None, think=None: say("391"))
+                        lambda self, model, messages, **kw: say("391"))
     code = main(["eval", "--model", "m", "--category", "basic", "--json"])
     out = capsys.readouterr().out
     assert code == 0 and json.loads(out)["ready"] is True
 
     monkeypatch.setattr("hamllm.cli.OllamaClient.chat",
-                        lambda self, model, messages, *, tools=None, think=None: say("?"))
+                        lambda self, model, messages, **kw: say("?"))
     assert main(["eval", "--model", "m", "--category", "basic"]) == 1
 
 
@@ -156,3 +157,19 @@ def test_cli_eval_rejects_uninstalled_model(monkeypatch):
     monkeypatch.setattr("hamllm.cli.OllamaClient.models", lambda self: ["other"])
     with pytest.raises(SystemExit):
         main(["eval", "--model", "m"])
+
+
+def test_cli_eval_save_writes_a_profile(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("HAMLLM_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr("hamllm.cli.OllamaClient.models", lambda self: ["m"])
+    monkeypatch.setattr("hamllm.evals.CASES", [BY_NAME["arithmetic"]])
+    monkeypatch.setattr("hamllm.cli.OllamaClient.chat", lambda self, model, messages, **kw: say("391"))
+    assert main(["eval", "--model", "m", "--save", "--num-ctx", "4096"]) == 0
+    saved = json.loads((tmp_path / "profiles.json").read_text())["m"]
+    assert saved["categories"] == {"basic": 1.0} and saved["num_ctx"] == 4096 and saved["repeats"] == 1
+
+
+def test_cli_eval_save_refuses_partial_suites(monkeypatch):
+    monkeypatch.setattr("hamllm.cli.OllamaClient.models", lambda self: ["m"])
+    with pytest.raises(SystemExit):
+        main(["eval", "--model", "m", "--save", "--category", "basic"])

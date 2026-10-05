@@ -16,8 +16,8 @@ from typing import Any, Callable
 
 from .agent import AgentRuntime, ToolRegistry
 from .ollama import OllamaClient, OllamaError
+from .profiles import DEFAULT_THRESHOLD
 
-DEFAULT_THRESHOLD = 0.8
 TOOL_SYSTEM = (
     "You are a careful local assistant with workspace tools. Use tools when you need "
     "information or must change something. Never claim an action completed unless a "
@@ -298,7 +298,12 @@ class CaseSummary:
 
 
 def run_case(
-    client: OllamaClient, model: str, case: Case, *, reasoning: str | None = None
+    client: OllamaClient,
+    model: str,
+    case: Case,
+    *,
+    reasoning: str | None = None,
+    options: dict[str, Any] | None = None,
 ) -> RunResult:
     started = time.monotonic()
     sandbox = Sandbox(case.files) if case.files is not None else None
@@ -312,6 +317,7 @@ def run_case(
         model=model,
         tools=sandbox.registry() if sandbox else ToolRegistry(),
         reasoning=reasoning,
+        options=options,
         max_tool_rounds=8,
         tool_observer=lambda name, args: tool_calls.append((name, args)),
     )
@@ -331,13 +337,14 @@ def run_suite(
     cases: list[Case] | None = None,
     repeats: int = 1,
     reasoning: str | None = None,
+    options: dict[str, Any] | None = None,
     on_result: Callable[[CaseSummary], None] | None = None,
 ) -> list[CaseSummary]:
     summaries = []
     for case in cases if cases is not None else CASES:
         summary = CaseSummary(case)
         for _ in range(repeats):
-            summary.runs.append(run_case(client, model, case, reasoning=reasoning))
+            summary.runs.append(run_case(client, model, case, reasoning=reasoning, options=options))
         summaries.append(summary)
         if on_result:
             on_result(summary)
@@ -355,11 +362,21 @@ def verdict(summaries: list[CaseSummary], threshold: float = DEFAULT_THRESHOLD) 
     return bool(summaries) and all(rate >= threshold for rate in category_rates(summaries).values())
 
 
-def report(model: str, summaries: list[CaseSummary], threshold: float = DEFAULT_THRESHOLD) -> dict[str, Any]:
+def report(
+    model: str,
+    summaries: list[CaseSummary],
+    threshold: float = DEFAULT_THRESHOLD,
+    *,
+    options: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    medians = [s.median_seconds for s in summaries]
     return {
         "model": model,
         "ready": verdict(summaries, threshold),
         "threshold": threshold,
+        "repeats": len(summaries[0].runs) if summaries else 0,
+        "num_ctx": (options or {}).get("num_ctx"),
+        "median_seconds": round(sum(medians) / len(medians), 2) if medians else None,
         "categories": category_rates(summaries),
         "cases": [
             {

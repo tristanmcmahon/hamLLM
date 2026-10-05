@@ -48,14 +48,18 @@ class AgentRuntime:
     max_response_rewrite_attempts: int = 1
     safe_policy_fallback: str = SAFE_POLICY_FALLBACK
     tool_observer: ToolObserver | None = None
+    options: dict[str, Any] | None = None
 
     def _chat(self, messages: list[dict[str, Any]], *, allow_tools: bool = True) -> dict[str, Any]:
         schemas = self.tools.schemas if allow_tools and self.tools.schemas else None
+        # Only forwarded when set, so clients that predate `options` keep working.
+        extra = {"options": self.options} if self.options else {}
         return self.client.chat(
             self.model,
             messages,
             tools=schemas,
             think=self.reasoning,
+            **extra,
         )
 
     @staticmethod

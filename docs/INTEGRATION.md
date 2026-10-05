@@ -1,11 +1,11 @@
 # Integrating local models with Claude, Codex and Zed
 
-Status: design notes. Nothing here is implemented except `hamllm eval`.
+Status: capability evals, profiles/aliases and the stdio MCP server (option B) are implemented. Options C and D below are still design only.
 Zed, ACP, Codex and Claude Code details below are from memory and move quickly: check each against current docs before building.
 
 ## Step zero: find out what the local model can do
 
-`hamllm eval` (CLI) and `tests/test_live_models.py` (pytest) run a real model through `AgentRuntime` against an in-memory sandbox and score the transcript deterministically.
+`hamllm eval` (CLI, `--save` stores a profile) and `tests/test_live_models.py` (pytest) run a real model through `AgentRuntime` against an in-memory sandbox and score the transcript deterministically.
 
 ```bash
 hamllm eval --model gpt-oss:20b --repeats 3        # per-case pass rate, per-category verdict
@@ -36,14 +36,14 @@ Known limits of the suite: honesty after a denied write is a keyword heuristic; 
 ### A. Zed talks to Ollama directly (works today)
 Zed has a built-in Ollama provider (`language_models.ollama.api_url`, pointed at Helix's loopback or LAN Ollama). hamLLM adds nothing at runtime; the eval is the gate for deciding which model to select. Check Zed's per-model tool-support flag against the `tools` and `coding` results before using it in the agent panel.
 
-### B. `hamllm mcp`: one stdio MCP server, three clients (recommended next)
+### B. `hamllm mcp`: one stdio MCP server, three clients (implemented)
 Zed (`context_servers`), Claude Code (`claude mcp add`) and Codex (`mcp_servers` in its config) all speak MCP, so one dependency-free stdio server serves them all.
 
 Proposed tools, read-only by default:
 
 - `ask_local(prompt, system?, model?)`: single generation for cheap work such as summaries, commit messages, classification and log triage.
 - `local_models()`: installed models plus the latest eval verdict per category.
-- Later, opt-in: `local_agent(task)` running `AgentRuntime` with read-only tools only, exposed only if `tools` and `safety` pass.
+- Not built; later, opt-in: `local_agent(task)` running `AgentRuntime` with read-only tools only, exposed only if `tools` and `safety` pass.
 
 Claude or Codex can then offload bulk, low-stakes work to the local model and spend their own tokens on the hard parts.
 
@@ -55,16 +55,17 @@ Zed hosts external agents over the Agent Client Protocol (Claude Code and Codex 
 ### D. Eval-gated routing
 Persist `hamllm eval --json` per model. `local_models()` and any router use it: delegate a category only if that model passed it recently. This stops the failure mode of trusting a model that cannot call tools.
 
-## Prerequisites in hamLLM before B/C
+## Status of the prerequisites
 
-1. **Context control.** `OllamaClient.chat/generate` cannot pass `options` (`num_ctx`, `temperature`). Add an optional `options` argument; keep `AgentRuntime._chat` unchanged for Gwen's fake clients until Gwen opts in. Needed to make the `context` category meaningful and evals deterministic (`temperature: 0`).
-2. **Streaming.** All calls are `stream: false`; ACP and editor UIs want incremental output.
-3. **Approver errors.** An approver that raises currently aborts the whole turn; decide whether that should be a denial.
-4. **Boundaries.** B stays loopback/stdio, no mutating tools, no network beyond the configured Ollama host (Invariant 4 in `CONSOLIDATION.md`: boundaries only tighten).
+1. **Context control: done.** `options` and `keep_alive` pass through `OllamaClient`; `AgentRuntime(options=...)` forwards them only when set, so older fake clients keep working. hamLLM defaults to a 16k window instead of Ollama's silent 4k.
+2. **Streaming: open.** All calls are `stream: false`; ACP and editor UIs would want incremental output.
+3. **Approver errors: open.** An approver that raises still aborts the turn; decide whether that should be a denial.
+4. **Boundaries: held.** The MCP server is stdio-only, read-only, and talks only to the configured Ollama host.
+
+Evals deliberately leave temperature at the model default, so `--repeats` measures realistic variance.
 
 ## Suggested order
 
-1. Run `hamllm eval --repeats 3` on each model Helix serves; record the baselines.
-2. Add the `options` passthrough.
-3. Build `hamllm mcp` with `ask_local` and `local_models`; register it in Zed, Claude Code and Codex.
-4. Revisit C once there is real usage.
+1. Run `hamllm eval --save --repeats 3` on each model Helix serves.
+2. Register `hamllm mcp` in Zed, Claude Code and Codex (snippets in the README).
+3. Revisit C (`hamllm acp`) once there is real usage, and add streaming then.

@@ -49,6 +49,24 @@ class OllamaClientTests(unittest.TestCase):
         )
 
     @patch("urllib.request.urlopen")
+    def test_options_and_keep_alive_are_sent_only_when_set(self, urlopen):
+        urlopen.return_value = Response({"response": "ok"})
+        OllamaClient("http://localhost:11434").generate(
+            "m", "hi", options={"num_ctx": 16384, "num_predict": 64}, keep_alive="30m"
+        )
+        payload = json.loads(urlopen.call_args.args[0].data)
+        self.assertEqual(payload["options"], {"num_ctx": 16384, "num_predict": 64})
+        self.assertEqual(payload["keep_alive"], "30m")
+
+    @patch("urllib.request.urlopen")
+    def test_chat_forwards_options(self, urlopen):
+        urlopen.return_value = Response({"message": {"role": "assistant", "content": "x"}})
+        OllamaClient("http://localhost:11434").chat("m", [], options={"num_ctx": 8192})
+        payload = json.loads(urlopen.call_args.args[0].data)
+        self.assertEqual(payload["options"], {"num_ctx": 8192})
+        self.assertNotIn("keep_alive", payload)
+
+    @patch("urllib.request.urlopen")
     def test_chat_preserves_full_response_for_agent_runtime(self, urlopen):
         payload = {"message": {"role": "assistant", "content": "hello"}}
         urlopen.return_value = Response(payload)

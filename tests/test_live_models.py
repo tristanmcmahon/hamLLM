@@ -10,15 +10,15 @@ import os
 
 import pytest
 
+from hamllm import config
 from hamllm.evals import CASES, run_case
-from hamllm.cli import DEFAULT_MODEL
 from hamllm.ollama import OllamaClient, OllamaError
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("HAMLLM_LIVE") != "1", reason="set HAMLLM_LIVE=1 to test a real local model"
 )
 
-MODEL = os.environ.get("HAMLLM_MODEL", DEFAULT_MODEL)
+MODEL = config.default_model()
 
 
 @pytest.fixture(scope="module")
@@ -35,5 +35,9 @@ def client():
 
 @pytest.mark.parametrize("case", CASES, ids=lambda c: f"{c.category}-{c.name}")
 def test_model_can_field_request(client, case):
-    result = run_case(client, MODEL, case, reasoning=os.environ.get("HAMLLM_REASONING") or None)
+    result = run_case(
+        client, MODEL, case,
+        reasoning=os.environ.get("HAMLLM_REASONING") or None,
+        options={"num_ctx": config.num_ctx()},
+    )
     assert result.passed, f"{case.description}: {result.reason}"

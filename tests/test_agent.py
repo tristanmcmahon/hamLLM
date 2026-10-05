@@ -115,3 +115,19 @@ def test_blocked_final_answer_is_rewritten_without_tools():
     assert runtime.run_turn(messages) == "safe text"
     assert client.calls[-1]["tools"] is None
     assert messages[-1]["content"] == "safe text"
+
+
+def test_options_reach_the_client_only_when_configured():
+    class Recording:
+        def __init__(self):
+            self.kwargs = []
+
+        def chat(self, model, messages, **kwargs):
+            self.kwargs.append(kwargs)
+            return answer("ok")
+
+    plain, tuned = Recording(), Recording()
+    AgentRuntime(client=plain, model="m").run_turn([{"role": "user", "content": "x"}])
+    AgentRuntime(client=tuned, model="m", options={"num_ctx": 8192}).run_turn([{"role": "user", "content": "x"}])
+    assert "options" not in plain.kwargs[0]
+    assert tuned.kwargs[0]["options"] == {"num_ctx": 8192}

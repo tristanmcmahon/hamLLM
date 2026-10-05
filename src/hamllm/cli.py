@@ -6,14 +6,19 @@ import os
 import sys
 from typing import Sequence
 
-from . import __version__
+from . import __version__, config, profiles
+from .config import DEFAULT_MODEL  # noqa: F401  (re-exported for callers)
 from .ollama import DEFAULT_HOST, OllamaClient, OllamaError
 
-DEFAULT_MODEL = "gpt-oss:20b"
+MCP_TIMEOUT_SECONDS = 120.0
 
 
 def _client(args: argparse.Namespace) -> OllamaClient:
     return OllamaClient(args.host, args.timeout)
+
+
+def _options(args: argparse.Namespace) -> dict[str, int]:
+    return {"num_ctx": args.num_ctx}
 
 
 def _prompt(words: list[str]) -> str:
@@ -29,11 +34,18 @@ def _prompt(words: list[str]) -> str:
 
 def run_once(args: argparse.Namespace) -> int:
     prompt = _prompt(args.prompt)
-    response = _client(args).generate(
-        args.model, prompt, args.system, think=args.reasoning
+    client = _client(args)
+    model = profiles.resolve(args.model, client.models(), profiles.load())
+    response = client.generate(
+        model,
+        prompt,
+        args.system,
+        think=args.reasoning,
+        options=_options(args),
+        keep_alive=config.keep_alive(),
     )
     if args.json:
-        print(json.dumps({"model": args.model, "response": response}))
+        print(json.dumps({"model": model, "response": response}))
     else:
         print(response)
     return 0
@@ -47,6 +59,12 @@ def list_models(args: argparse.Namespace) -> int:
         print("\n".join(models))
     else:
         print("No Ollama models are installed.")
+    return 0
+
+
+def resolve_model(args: argparse.Namespace) -> int:
+    model = profiles.resolve(args.name, _client(args).models(), profiles.load(), threshold=args.threshold)
+    print(model)
     return 0
 
 
@@ -97,6 +115,10 @@ def evaluate(args: argparse.Namespace) -> int:
     cases = [c for c in evals.CASES if not args.category or c.category in args.category]
     if not cases:
         raise ValueError(f"no cases match; categories: {', '.join(evals.CATEGORIES)}")
+    if args.save and args.category:
+        raise ValueError("--save needs the full suite; drop --category")
+    out = sys.stderr if args.json else sys.stdout
+    options = _options(args)
 
     def show(summary: evals.CaseSummary) -> None:
         passed = sum(r.passed for r in summary.runs)
@@ -104,17 +126,19 @@ def evaluate(args: argparse.Namespace) -> int:
         print(
             f"{state}  {summary.case.category}/{summary.case.name}  "
             f"{passed}/{len(summary.runs)}  {summary.median_seconds:.1f}s",
-            file=sys.stderr if args.json else sys.stdout,
+            file=out,
         )
         for run in summary.runs:
             if not run.passed:
-                print(f"      {run.reason}", file=sys.stderr if args.json else sys.stdout)
+                print(f"      {run.reason}", file=out)
 
     summaries = evals.run_suite(
         client, args.model, cases=cases, repeats=args.repeats,
-        reasoning=args.reasoning, on_result=show,
+        reasoning=args.reasoning, options=options, on_result=show,
     )
-    result = evals.report(args.model, summaries, args.threshold)
+    result = evals.report(args.model, summaries, args.threshold, options=options)
+    if args.save:
+        print(f"profile saved to {profiles.save_report(result)}", file=out)
     if args.json:
         print(json.dumps(result))
     else:
@@ -124,50 +148,16 @@ def evaluate(args: argparse.Namespace) -> int:
     return 0 if result["ready"] else 1
 
 
-def chat(args: argparse.Namespace) -> int:
-    client = _client(args)
-    messages: list[dict[str, str]] = []
-    if args.system:
-        messages.append({"role": "system", "content": args.system})
-    model = args.model
-    print(f"hamLLM {__version__} — {model} ({args.host})")
-    print("/clear resets context; /model NAME switches model; /exit quits.")
-    while True:
-        try:
-            line = input("you> ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return 0
-        if not line:
-            continue
-        if line in {"/exit", "/quit"}:
-            return 0
-        if line == "/clear":
-            messages = [item for item in messages if item["role"] == "system"]
-            print("Context cleared.")
-            continue
-        if line.startswith("/model "):
-            candidate = line.removeprefix("/model ").strip()
-            if not candidate:
-                print("Model name is empty.", file=sys.stderr)
-                continue
-            model = candidate
-            messages = [item for item in messages if item["role"] == "system"]
-            print(f"Using {model}; context cleared.")
-            continue
-        messages.append({"role": "user", "content": line})
-        try:
-            response = client.chat_content(model, messages, think=args.reasoning)
-        except OllamaError:
-            messages.pop()
-            raise
-        messages.append({"role": "assistant", "content": response})
-        print(f"{model}> {response}")
+def mcp_server(args: argparse.Namespace) -> int:
+    from .mcp import Server, serve
+
+    return serve(Server(_client(args), num_ctx=args.num_ctx))
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="hamllm", description="Run and inspect local Ollama models"
+        prog="hamllm",
+        description="Capability profiles, evals and an MCP front door for local Ollama models",
     )
     parser.add_argument("--version", action="version", version=f"hamLLM {__version__}")
     common = argparse.ArgumentParser(add_help=False)
@@ -179,13 +169,17 @@ def build_parser() -> argparse.ArgumentParser:
             or DEFAULT_HOST
         ),
     )
-    common.add_argument(
-        "--model", default=os.environ.get("HAMLLM_MODEL", DEFAULT_MODEL)
-    )
+    common.add_argument("--model", default=config.default_model())
     common.add_argument(
         "--timeout",
         type=float,
         default=float(os.environ.get("HAMLLM_TIMEOUT", "300")),
+    )
+    common.add_argument(
+        "--num-ctx",
+        type=int,
+        default=config.num_ctx(),
+        help="context window in tokens (env HAMLLM_NUM_CTX)",
     )
     common.add_argument(
         "--reasoning",
@@ -195,17 +189,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     commands = parser.add_subparsers(dest="command", required=True)
-    run = commands.add_parser("run", parents=[common], help="run one prompt")
+    run = commands.add_parser(
+        "run", parents=[common], help="run one prompt (--model accepts an alias)"
+    )
     run.add_argument("prompt", nargs="*")
     run.add_argument("--system")
     run.add_argument("--json", action="store_true")
     run.set_defaults(handler=run_once)
-
-    interactive = commands.add_parser(
-        "chat", parents=[common], help="start an interactive local chat"
-    )
-    interactive.add_argument("--system")
-    interactive.set_defaults(handler=chat)
 
     models = commands.add_parser(
         "models", parents=[common], help="list installed Ollama models"
@@ -223,10 +213,26 @@ def build_parser() -> argparse.ArgumentParser:
         "eval", parents=[common], help="test whether the model can field real requests"
     )
     probe.add_argument("--repeats", type=int, default=1, help="runs per case")
-    probe.add_argument("--threshold", type=float, default=0.8, help="min pass rate per category")
+    probe.add_argument("--threshold", type=float, default=profiles.DEFAULT_THRESHOLD, help="min pass rate per category")
     probe.add_argument("--category", action="append", help="limit to a category (repeatable)")
+    probe.add_argument("--save", action="store_true", help="store the result as this model's capability profile")
     probe.add_argument("--json", action="store_true")
     probe.set_defaults(handler=evaluate)
+
+    resolve = commands.add_parser(
+        "resolve", parents=[common], help="print the installed model an alias resolves to"
+    )
+    resolve.add_argument("name", help="tag or alias: " + ", ".join([profiles.DEFAULT_ALIAS, *profiles.ALIASES]))
+    resolve.add_argument("--threshold", type=float, default=profiles.DEFAULT_THRESHOLD)
+    resolve.set_defaults(handler=resolve_model)
+
+    serve = commands.add_parser(
+        "mcp", parents=[common], help="serve local models to MCP clients over stdio"
+    )
+    serve.set_defaults(
+        handler=mcp_server,
+        timeout=float(os.environ.get("HAMLLM_MCP_TIMEOUT", MCP_TIMEOUT_SECONDS)),
+    )
     return parser
 
 
