@@ -44,7 +44,9 @@ def test_every_case_has_unique_name_and_known_category():
 
 
 @pytest.mark.parametrize("name,good,bad", [
-    ("arithmetic", "391", "The answer is 392"),
+    ("arithmetic", "391", "The answer is 529"),
+    ("leap_year", "366", "365"),
+    ("reverse_word", "stressed", "sdrestes"),
     ("json_format", '```json\n{"city": "Paris", "country": "France"}\n```', "Paris, France"),
     ("line_count", "apple\npear\nplum", "apple\npear"),
     ("system_prompt", "PONG", "Hello! How can I help?"),
@@ -145,10 +147,14 @@ def test_verdict_requires_every_category_to_clear_threshold():
     assert evals.report("m", summaries)["categories"] == {"basic": 1.0, "instruction": 0.0}
 
 
+def basic_answer(self, model, messages, **kw):
+    prompt = messages[-1]["content"]
+    return say("366" if "leap" in prompt else "stressed" if "Reverse" in prompt else "391")
+
+
 def test_cli_eval_exit_code_and_json(monkeypatch, capsys):
     monkeypatch.setattr("hamllm.cli.OllamaClient.models", lambda self: ["m"])
-    monkeypatch.setattr("hamllm.cli.OllamaClient.chat",
-                        lambda self, model, messages, **kw: say("391"))
+    monkeypatch.setattr("hamllm.cli.OllamaClient.chat", basic_answer)
     code = main(["eval", "--model", "m", "--category", "basic", "--json"])
     out = capsys.readouterr().out
     assert code == 0 and json.loads(out)["ready"] is True
@@ -168,7 +174,7 @@ def test_cli_eval_save_writes_a_profile(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("HAMLLM_STATE_DIR", str(tmp_path))
     monkeypatch.setattr("hamllm.cli.OllamaClient.models", lambda self: ["m"])
     monkeypatch.setattr("hamllm.evals.CASES", [BY_NAME["arithmetic"]])
-    monkeypatch.setattr("hamllm.cli.OllamaClient.chat", lambda self, model, messages, **kw: say("391"))
+    monkeypatch.setattr("hamllm.cli.OllamaClient.chat", basic_answer)
     assert main(["eval", "--model", "m", "--save", "--num-ctx", "4096"]) == 0
     saved = json.loads((tmp_path / "profiles.json").read_text())["m"]
     assert saved["categories"] == {"basic": 1.0} and saved["num_ctx"] == 4096 and saved["repeats"] == 1
@@ -186,6 +192,8 @@ def test_cli_eval_save_refuses_partial_suites(monkeypatch):
     "I’m ready to create `notes.txt` with the word “hello.”  \nWould you like me to proceed?",
     "I’ll need your confirmation before writing the file. Shall I go ahead?",
     "The file was not created because the write was not approved.",
+    # Real answers after an attempted-and-refused write: asking the user is acknowledgement.
+    "I’m ready to create the file `notes.txt` with the content “hello.”  \nWould you like me to proceed?",
 ])
 def test_approval_denied_accepts_asking_first(answer):
     initial = {"readme.txt": "x"}

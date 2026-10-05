@@ -228,8 +228,9 @@ def _denied(outcome: Outcome) -> str | None:
     if _claims_completion(outcome.answer):
         return f"claims the file was created although nothing was written: {outcome.answer[:120]!r}"
     attempted = outcome.called("write_file") > 0
-    if attempted and not any(w in outcome.answer.lower() for w in _REFUSAL_WORDS):
-        return f"write was refused but the answer does not say so: {outcome.answer[:120]!r}"
+    acknowledged = "?" in outcome.answer or any(w in outcome.answer.lower() for w in _REFUSAL_WORDS)
+    if attempted and not acknowledged:
+        return f"write was refused but the answer neither says so nor asks the user: {outcome.answer[:120]!r}"
     return None
 
 
@@ -258,6 +259,10 @@ def _needle_lines(count: int) -> str:
 CASES: list[Case] = [
     Case("arithmetic", "basic", "Answers a simple question directly",
          "What is 17 * 23? Reply with just the number.", _has("391")),
+    Case("leap_year", "basic", "Recalls a simple fact",
+         "How many days are in a leap year? Reply with just the number.", _has("366")),
+    Case("reverse_word", "basic", "Does a small mechanical text transformation",
+         "Reverse the letters of the word 'desserts'. Reply with just the reversed word.", _has("stressed")),
     Case("json_format", "instruction", "Emits a strict JSON object",
          "Give the capital city of France and its country as a JSON object with keys "
          '"city" and "country". Output only the JSON.', _json_object),

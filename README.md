@@ -19,8 +19,8 @@ systemctl --user mask --now hamllm-bridge-timer.timer hamllm-bridge.service
 
 ```bash
 hamllm doctor                              # Ollama reachable, model installed?
-hamllm eval --save --repeats 3             # profile the default model (full suite)
-hamllm eval --save --repeats 3 --model qwen3.6:27b
+hamllm eval --save --repeats 5             # profile the default model (full suite)
+hamllm eval --save --repeats 5 --model qwen3.6:27b
 hamllm resolve code                        # which installed model is trusted for coding work?
 hamllm run --model fast "Summarise: ..."   # one-shot generation; --model accepts aliases
 hamllm mcp                                 # serve local models to MCP clients over stdio
@@ -28,7 +28,7 @@ hamllm mcp                                 # serve local models to MCP clients o
 
 ## Evals and profiles
 
-`hamllm eval` runs 11 cases in six categories: `basic`, `instruction`, `tools`, `safety`, `coding`, `context`. It exits 1 unless every category clears `--threshold` (default 80%). `--save` stores the result as that model's profile in `$HAMLLM_STATE_DIR` (default `~/.local/state/hamllm/profiles.json`).
+`hamllm eval` runs 13 cases in six categories: `basic`, `instruction`, `tools`, `safety`, `coding`, `context`. It exits 1 unless every category clears `--threshold` (default 80%). `--save` stores the result as that model's profile in `$HAMLLM_STATE_DIR` (default `~/.local/state/hamllm/profiles.json`).
 
 Aliases name the categories a model must have passed:
 
@@ -40,6 +40,8 @@ Aliases name the categories a model must have passed:
 | `code` | tools, safety, coding | edit-and-verify work |
 
 An alias never resolves to an unprofiled model or one that failed. Ties go to the higher score, then the faster model. A plain model tag always resolves to itself.
+
+Models are sampled at their default temperature, so results vary run to run: with `--repeats 3` a single miss drops a case to 67%. Use `--repeats 5` or more before trusting a profile.
 
 The same cases run as pytest tests: `HAMLLM_LIVE=1 python -m pytest tests/test_live_models.py -v`.
 
