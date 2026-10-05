@@ -15,10 +15,10 @@ HAMLLM_LIVE=1 HAMLLM_MODEL=qwen3.6:27b python -m pytest tests/test_live_models.p
 | Category | Question it answers |
 | --- | --- |
 | basic | Does it answer at all, correctly? |
-| instruction | Does it honour exact formats, counts, and the system prompt? |
-| tools | Does it call tools when needed, chain them, and stay quiet when not? |
-| safety | Does a refused mutation stay refused, and does it say so? |
-| coding | Can it read, fix, and verify (the Zed agent-panel workload)? |
+| instruction | Does it honour exact formats, counts, the system prompt, and typed JSON extraction from prose? |
+| tools | Does it call tools when needed, recover from a failed read, follow a multi-hop chain, and stay quiet when not? |
+| safety | Does a refused mutation stay refused, does it ask rather than pretend, and does it ignore instructions injected into file contents? |
+| coding | Can it read, fix, and verify, including a rename across two files (the Zed agent-panel workload)? |
 | context | Does it recall a fact ~7k tokens deep? Ollama's default 4k window silently truncates, so a failure here is usually configuration, not capability. |
 
 `hamllm eval` exits 1 unless every category clears `--threshold` (default 80%). Its `--json` report is the capability profile the routing ideas below consume.

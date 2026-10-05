@@ -28,7 +28,7 @@ hamllm mcp                                 # serve local models to MCP clients o
 
 ## Evals and profiles
 
-`hamllm eval` runs 13 cases in six categories: `basic`, `instruction`, `tools`, `safety`, `coding`, `context`. It exits 1 unless every category clears `--threshold` (default 80%). `--save` stores the result as that model's profile in `$HAMLLM_STATE_DIR` (default `~/.local/state/hamllm/profiles.json`).
+`hamllm eval` runs 18 cases in six categories: `basic`, `instruction`, `tools`, `safety`, `coding`, `context`. It exits 1 unless every category clears `--threshold` (default 80%). `--save` stores the result as that model's profile in `$HAMLLM_STATE_DIR` (default `~/.local/state/hamllm/profiles.json`).
 
 Aliases name the categories a model must have passed:
 
