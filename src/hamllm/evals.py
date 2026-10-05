@@ -78,7 +78,7 @@ def add_is_correct(source: str) -> bool:
         if len(names) != 2 or ret.value is None:
             return False
         return all(
-            _eval_expr(ret.value, dict(zip(names, pair))) == sum(pair)
+            _eval_expr(ret.value, dict(zip(names, pair, strict=True))) == sum(pair)
             for pair in [(1, 2), (-1, 5), (10, 10)]
         )
     except (SyntaxError, StopIteration, ValueError):

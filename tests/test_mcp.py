@@ -130,3 +130,22 @@ def test_stale_profile_is_ignored_and_flagged_after_the_model_changes():
     assert data["profiles"]["m"]["stale"] is True
     client.digests = {"m": "old"}
     assert call(srv, "ask_local", prompt="x", model="fast")["isError"] is False
+
+
+def test_oversized_prompt_is_rejected_instead_of_silently_truncated():
+    client = FakeClient()
+    result = call(server(client), "ask_local", prompt="x" * (8192 * mcp.CHARS_PER_TOKEN + 4))
+    assert result["isError"] and "window is 8192" in result["content"][0]["text"]
+    assert client.generated == []
+    assert call(server(client), "ask_local", prompt="x" * 1000)["isError"] is False
+
+
+def test_unprofiled_models_are_not_loadable_over_mcp_except_the_default():
+    client = FakeClient(models=["m", "big:70b"])
+    result = call(server(client), "ask_local", prompt="x", model="big:70b")
+    assert result["isError"] and "never been profiled" in result["content"][0]["text"]
+    assert client.generated == []
+    assert call(server(client), "ask_local", prompt="x", model="m")["isError"] is False  # default
+    profiled = {**PROFILE, "big:70b": PROFILE["m"]}
+    ok = Server(client, num_ctx=8192, keep_alive="5m", load_profiles=lambda: profiled)
+    assert call(ok, "ask_local", prompt="x", model="big:70b")["isError"] is False

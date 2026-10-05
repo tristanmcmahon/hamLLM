@@ -60,7 +60,7 @@ Persist `hamllm eval --json` per model. `local_models()` and any router use it: 
 1. **Context control: done.** `options` and `keep_alive` pass through `OllamaClient`; `AgentRuntime(options=...)` forwards them only when set, so older fake clients keep working. hamLLM defaults to a 16k window instead of Ollama's silent 4k.
 2. **Streaming: open.** All calls are `stream: false`; ACP and editor UIs would want incremental output.
 3. **Approver errors: done.** An approver that raises is treated as a denial (default-deny holds even if the approval UI crashes).
-4. **Boundaries: held.** The MCP server is stdio-only, read-only, and talks only to the configured Ollama host.
+4. **Boundaries: held.** The MCP server is stdio-only, read-only, and talks only to the configured Ollama host. It also refuses prompts that overflow the window and models that were never profiled, so a calling agent cannot trigger a surprise model load.
 
 Evals deliberately leave temperature at the model default, so `--repeats` measures realistic variance.
 

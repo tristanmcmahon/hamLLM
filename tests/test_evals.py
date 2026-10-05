@@ -6,7 +6,7 @@ import pytest
 
 from hamllm import evals
 from hamllm.cli import main
-from hamllm.evals import CASES, Case, Outcome, Sandbox, add_is_correct, run_case, run_suite
+from hamllm.evals import CASES, Outcome, Sandbox, add_is_correct, run_case, run_suite
 
 BY_NAME = {case.name: case for case in CASES}
 

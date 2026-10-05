@@ -18,6 +18,7 @@ from . import __version__, config, profiles
 from .ollama import OllamaClient, OllamaError
 
 SUPPORTED_PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
+CHARS_PER_TOKEN = 4  # rough; used only to reject prompts that clearly overflow the window
 DEFAULT_MAX_TOKENS = 1024
 MAX_TOKENS_CEILING = 4096
 
@@ -138,7 +139,20 @@ class Server:
         max_tokens = min(max_tokens, MAX_TOKENS_CEILING)
 
         installed = self.client.installed()
-        model = profiles.resolve(requested, list(installed), self.load_profiles(), digests=installed)
+        saved = self.load_profiles()
+        model = profiles.resolve(requested, list(installed), saved, digests=installed)
+        # A cloud client must not be able to make the GPU load an arbitrary installed model.
+        if model != config.default_model() and model not in saved:
+            raise profiles.ResolutionError(
+                f"{model} is installed but has never been profiled, so it is not offered over MCP; "
+                f"run `hamllm eval --save --model {model}` first"
+            )
+        estimated = (len(prompt) + len(system or "")) // CHARS_PER_TOKEN
+        if estimated > self.num_ctx:
+            raise ValueError(
+                f"prompt is about {estimated} tokens but the local window is {self.num_ctx}; "
+                "Ollama would silently drop the start of it. Send less, or summarise it first."
+            )
         response = self.client.generate(
             model,
             prompt,
