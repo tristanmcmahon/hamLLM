@@ -21,6 +21,7 @@ systemctl --user mask --now hamllm-bridge-timer.timer hamllm-bridge.service
 hamllm doctor                              # Ollama reachable, model installed?
 hamllm eval --save --repeats 5             # profile the default model (full suite)
 hamllm eval --save --repeats 5 --model qwen3.6:27b
+hamllm eval --save --all --repeats 3       # every text-generation model, then a comparison table
 hamllm resolve code                        # which installed model is trusted for coding work?
 hamllm run --model fast "Summarise: ..."   # one-shot generation; --model accepts aliases
 hamllm mcp                                 # serve local models to MCP clients over stdio

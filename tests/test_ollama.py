@@ -46,6 +46,15 @@ class OllamaClientTests(unittest.TestCase):
         )
 
     @patch("urllib.request.urlopen")
+    def test_capabilities_reads_show_endpoint_and_tolerates_absence(self, urlopen):
+        client = OllamaClient("http://localhost:11434")
+        urlopen.return_value = Response({"capabilities": ["completion", "tools", 7]})
+        self.assertEqual(client.capabilities("m"), ["completion", "tools"])
+        self.assertEqual(urlopen.call_args.args[0].full_url, "http://localhost:11434/api/show")
+        urlopen.return_value = Response({"details": {}})
+        self.assertEqual(client.capabilities("m"), [])
+
+    @patch("urllib.request.urlopen")
     def test_generate_sends_non_streaming_payload(self, urlopen):
         urlopen.return_value = Response({"response": "local answer"})
         client = OllamaClient("http://localhost:11434")

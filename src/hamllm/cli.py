@@ -121,19 +121,9 @@ def doctor(args: argparse.Namespace) -> int:
     return 0 if healthy else 1
 
 
-def evaluate(args: argparse.Namespace) -> int:
+def _eval_one(client: OllamaClient, model: str, digest: str, cases: list, args: argparse.Namespace, out) -> dict:
     from . import evals
 
-    client = _client(args)
-    installed = client.installed()
-    if args.model not in installed:
-        raise ValueError(f"model {args.model!r} is not installed; run `hamllm models`")
-    cases = [c for c in evals.CASES if not args.category or c.category in args.category]
-    if not cases:
-        raise ValueError(f"no cases match; categories: {', '.join(evals.CATEGORIES)}")
-    if args.save and args.category:
-        raise ValueError("--save needs the full suite; drop --category")
-    out = sys.stderr if args.json else sys.stdout
     options = _options(args)
 
     def show(summary: evals.CaseSummary) -> None:
@@ -149,19 +139,64 @@ def evaluate(args: argparse.Namespace) -> int:
                 print(f"      {run.reason}", file=out)
 
     summaries = evals.run_suite(
-        client, args.model, cases=cases, repeats=args.repeats,
+        client, model, cases=cases, repeats=args.repeats,
         reasoning=args.reasoning, options=options, on_result=show,
     )
-    result = evals.report(args.model, summaries, args.threshold, options=options)
+    result = evals.report(model, summaries, args.threshold, options=options)
     if args.save:
-        print(f"profile saved to {profiles.save_report(result, digest=installed[args.model])}", file=out)
+        print(f"profile saved to {profiles.save_report(result, digest=digest)}", file=out)
+    return result
+
+
+def _chat_capable(client: OllamaClient, model: str) -> bool:
+    """False only when Ollama positively says the model cannot generate (e.g. embedding-only)."""
+    try:
+        capabilities = client.capabilities(model)
+    except OllamaError:
+        return True
+    return not capabilities or "completion" in capabilities
+
+
+def evaluate(args: argparse.Namespace) -> int:
+    from . import evals
+
+    client = _client(args)
+    installed = client.installed()
+    cases = [c for c in evals.CASES if not args.category or c.category in args.category]
+    if not cases:
+        raise ValueError(f"no cases match; categories: {', '.join(evals.CATEGORIES)}")
+    if args.save and args.category:
+        raise ValueError("--save needs the full suite; drop --category")
+    out = sys.stderr if args.json else sys.stdout
+
+    if not args.all:
+        if args.model not in installed:
+            raise ValueError(f"model {args.model!r} is not installed; run `hamllm models`")
+        result = _eval_one(client, args.model, installed[args.model], cases, args, out)
+        if args.json:
+            print(json.dumps(result))
+        else:
+            for category, rate in result["categories"].items():
+                print(f"{category:12} {rate:.0%}")
+            print("READY" if result["ready"] else "NOT READY", f"({args.model}, threshold {args.threshold:.0%})")
+        return 0 if result["ready"] else 1
+
+    results = []
+    for model in sorted(installed):
+        if not _chat_capable(client, model):
+            print(f"SKIP  {model}: not a text-generation model", file=out)
+            continue
+        print(f"== {model} ==", file=out)
+        results.append(_eval_one(client, model, installed[model], cases, args, out))
     if args.json:
-        print(json.dumps(result))
+        print(json.dumps({"reports": results}))
     else:
-        for category, rate in result["categories"].items():
-            print(f"{category:12} {rate:.0%}")
-        print("READY" if result["ready"] else "NOT READY", f"({args.model}, threshold {args.threshold:.0%})")
-    return 0 if result["ready"] else 1
+        categories = list(evals.CATEGORIES)
+        print(f"\n{'model':28} {'verdict':10} " + " ".join(f"{c[:6]:>6}" for c in categories) + "   median")
+        for r in sorted(results, key=lambda r: (not r["ready"], r["median_seconds"] or 0)):
+            rates = " ".join(f"{r['categories'].get(c, 0):>6.0%}" for c in categories)
+            print(f"{r['model']:28} {'READY' if r['ready'] else 'not ready':10} {rates}   {r['median_seconds']}s")
+    return 0 if any(r["ready"] for r in results) else 1
 
 
 def mcp_server(args: argparse.Namespace) -> int:
@@ -231,6 +266,7 @@ def build_parser() -> argparse.ArgumentParser:
     probe.add_argument("--repeats", type=int, default=1, help="runs per case")
     probe.add_argument("--threshold", type=float, default=profiles.DEFAULT_THRESHOLD, help="min pass rate per category")
     probe.add_argument("--category", action="append", help="limit to a category (repeatable)")
+    probe.add_argument("--all", action="store_true", help="evaluate every installed text-generation model and compare")
     probe.add_argument("--save", action="store_true", help="store the result as this model's capability profile")
     probe.add_argument("--json", action="store_true")
     probe.set_defaults(handler=evaluate)

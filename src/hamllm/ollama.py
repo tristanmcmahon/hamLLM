@@ -108,6 +108,14 @@ class OllamaClient:
                 found[entry["name"]] = digest if isinstance(digest, str) else ""
         return found
 
+    def capabilities(self, model: str) -> list[str]:
+        """Ollama's declared capabilities for a model (e.g. completion, tools, embedding).
+
+        Empty when the server does not report any, so callers must treat "unknown" as possible.
+        """
+        reported = self._request("/api/show", {"model": model}).get("capabilities")
+        return [c for c in reported if isinstance(c, str)] if isinstance(reported, list) else []
+
     def models(self) -> list[str]:
         return sorted(self.installed())
 
