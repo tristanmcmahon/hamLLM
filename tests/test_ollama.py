@@ -37,6 +37,15 @@ class OllamaClientTests(unittest.TestCase):
         )
 
     @patch("urllib.request.urlopen")
+    def test_installed_maps_tags_to_digests_and_tolerates_missing_ones(self, urlopen):
+        urlopen.return_value = Response(
+            {"models": [{"name": "a:1", "digest": "sha-a"}, {"name": "b:2"}, {"digest": "orphan"}, "junk"]}
+        )
+        self.assertEqual(
+            OllamaClient("http://localhost:11434").installed(), {"a:1": "sha-a", "b:2": ""}
+        )
+
+    @patch("urllib.request.urlopen")
     def test_generate_sends_non_streaming_payload(self, urlopen):
         urlopen.return_value = Response({"response": "local answer"})
         client = OllamaClient("http://localhost:11434")

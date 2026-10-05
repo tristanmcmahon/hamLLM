@@ -96,12 +96,20 @@ class OllamaClient:
             raise OllamaError("Ollama did not report a version")
         return version
 
-    def models(self) -> list[str]:
+    def installed(self) -> dict[str, str]:
+        """Installed model tags mapped to their content digest ("" if unreported)."""
         entries = self._request("/api/tags").get("models")
         if not isinstance(entries, list):
             raise OllamaError("Ollama did not return a model list")
-        names = [entry.get("name") for entry in entries if isinstance(entry, dict)]
-        return sorted(name for name in names if isinstance(name, str) and name)
+        found: dict[str, str] = {}
+        for entry in entries:
+            if isinstance(entry, dict) and isinstance(entry.get("name"), str) and entry["name"]:
+                digest = entry.get("digest")
+                found[entry["name"]] = digest if isinstance(digest, str) else ""
+        return found
+
+    def models(self) -> list[str]:
+        return sorted(self.installed())
 
     def generate(
         self,

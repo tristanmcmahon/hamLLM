@@ -63,6 +63,20 @@ class AgentRuntime:
         )
 
     @staticmethod
+    def _safe_approver(approver: ToolApprover | None) -> ToolApprover:
+        """Default-deny: no approver, or one that raises, means "not approved"."""
+        if approver is None:
+            return lambda _name, _arguments: False
+
+        def approve(name: str, arguments: dict[str, Any]) -> bool:
+            try:
+                return bool(approver(name, arguments))
+            except Exception:
+                return False
+
+        return approve
+
+    @staticmethod
     def _assistant_message(response: dict[str, Any]) -> dict[str, Any]:
         message = response.get("message")
         if not isinstance(message, dict):
@@ -127,7 +141,7 @@ class AgentRuntime:
         seen_observations: set[str] = set()
         seen_mutations: set[str] = set()
         seen_executions: set[str] = set()
-        approve = approver or (lambda _name, _arguments: False)
+        approve = self._safe_approver(approver)
 
         for _ in range(self.max_tool_rounds):
             assistant_message = self._assistant_message(self._chat(messages))

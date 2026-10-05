@@ -65,3 +65,19 @@ def test_load_tolerates_missing_and_corrupt_files(tmp_path):
     assert profiles.load(bad) == {}
     bad.write_text(json.dumps([1, 2]))
     assert profiles.load(bad) == {}
+
+
+def test_digest_change_voids_a_profile():
+    saved = {"a": {**GOOD, "digest": "old"}}
+    assert resolve("code", ["a"], saved, digests={"a": "old"}) == "a"
+    with pytest.raises(ResolutionError, match="digest"):
+        resolve("code", ["a"], saved, digests={"a": "new"})
+    # Profiles saved without a digest, or digests not reported, are not treated as stale.
+    assert resolve("code", ["a"], {"a": GOOD}, digests={"a": "anything"}) == "a"
+    assert resolve("code", ["a"], saved, digests={}) == "a"
+
+
+def test_save_report_records_digest(tmp_path):
+    path = tmp_path / "p.json"
+    profiles.save_report({"model": "a", "ready": True, "threshold": 0.8, "categories": {}}, path, digest="sha-9")
+    assert profiles.load(path)["a"]["digest"] == "sha-9"

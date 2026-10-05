@@ -35,7 +35,8 @@ def _prompt(words: list[str]) -> str:
 def run_once(args: argparse.Namespace) -> int:
     prompt = _prompt(args.prompt)
     client = _client(args)
-    model = profiles.resolve(args.model, client.models(), profiles.load())
+    installed = client.installed()
+    model = profiles.resolve(args.model, list(installed), profiles.load(), digests=installed)
     response = client.generate(
         model,
         prompt,
@@ -51,20 +52,32 @@ def run_once(args: argparse.Namespace) -> int:
     return 0
 
 
+def _profile_summary(profile: dict | None, digest: str) -> str:
+    if profile is None:
+        return "not profiled"
+    state = "ready" if profile.get("ready") else "NOT ready"
+    if profiles.is_stale(profile, digest):
+        return f"STALE (weights changed since {profile.get('evaluated_at')}); re-run eval"
+    rates = ", ".join(f"{c} {r:.0%}" for c, r in (profile.get("categories") or {}).items())
+    return f"{state} ({rates}) evaluated {profile.get('evaluated_at')}"
+
+
 def list_models(args: argparse.Namespace) -> int:
-    models = _client(args).models()
+    installed = _client(args).installed()
+    saved = profiles.load()
     if args.json:
-        print(json.dumps({"models": models}))
-    elif models:
-        print("\n".join(models))
+        print(json.dumps({"models": sorted(installed), "profiles": {m: saved[m] for m in installed if m in saved}}))
+    elif installed:
+        for model in sorted(installed):
+            print(f"{model}  {_profile_summary(saved.get(model), installed[model])}")
     else:
         print("No Ollama models are installed.")
     return 0
 
 
 def resolve_model(args: argparse.Namespace) -> int:
-    model = profiles.resolve(args.name, _client(args).models(), profiles.load(), threshold=args.threshold)
-    print(model)
+    installed = _client(args).installed()
+    print(profiles.resolve(args.name, list(installed), profiles.load(), threshold=args.threshold, digests=installed))
     return 0
 
 
@@ -72,7 +85,8 @@ def doctor(args: argparse.Namespace) -> int:
     client = _client(args)
     try:
         version = client.version()
-        models = client.models()
+        installed = client.installed()
+        models = sorted(installed)
     except OllamaError as exc:
         payload = {
             "healthy": False,
@@ -102,6 +116,8 @@ def doctor(args: argparse.Namespace) -> int:
         state = "PASS" if healthy else "FAIL"
         detail = "installed" if healthy else "not installed"
         print(f"{state}  {args.model}: {detail}")
+        if healthy:
+            print(f"INFO  profile: {_profile_summary(profiles.load().get(args.model), installed[args.model])}")
     return 0 if healthy else 1
 
 
@@ -109,7 +125,7 @@ def evaluate(args: argparse.Namespace) -> int:
     from . import evals
 
     client = _client(args)
-    installed = client.models()
+    installed = client.installed()
     if args.model not in installed:
         raise ValueError(f"model {args.model!r} is not installed; run `hamllm models`")
     cases = [c for c in evals.CASES if not args.category or c.category in args.category]
@@ -138,7 +154,7 @@ def evaluate(args: argparse.Namespace) -> int:
     )
     result = evals.report(args.model, summaries, args.threshold, options=options)
     if args.save:
-        print(f"profile saved to {profiles.save_report(result)}", file=out)
+        print(f"profile saved to {profiles.save_report(result, digest=installed[args.model])}", file=out)
     if args.json:
         print(json.dumps(result))
     else:

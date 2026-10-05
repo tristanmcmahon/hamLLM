@@ -16,7 +16,7 @@ class CliTests(unittest.TestCase):
 
     @patch("hamllm.cli.OllamaClient")
     def test_run_prints_local_response(self, client_type):
-        client_type.return_value.models.return_value = ["gpt-oss:20b"]
+        client_type.return_value.installed.return_value = {"gpt-oss:20b": "sha"}
         client_type.return_value.generate.return_value = "answer"
         output = io.StringIO()
         with redirect_stdout(output):
@@ -30,7 +30,7 @@ class CliTests(unittest.TestCase):
     def test_doctor_fails_when_selected_model_is_missing(self, client_type):
         client = MagicMock()
         client.version.return_value = "0.11.0"
-        client.models.return_value = ["qwen3.6:27b"]
+        client.installed.return_value = {"qwen3.6:27b": "sha"}
         client_type.return_value = client
         output = io.StringIO()
         with redirect_stdout(output):

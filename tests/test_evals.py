@@ -218,7 +218,7 @@ def basic_answer(self, model, messages, **kw):
 
 
 def test_cli_eval_exit_code_and_json(monkeypatch, capsys):
-    monkeypatch.setattr("hamllm.cli.OllamaClient.models", lambda self: ["m"])
+    monkeypatch.setattr("hamllm.cli.OllamaClient.installed", lambda self: {"m": "sha-1"})
     monkeypatch.setattr("hamllm.cli.OllamaClient.chat", basic_answer)
     code = main(["eval", "--model", "m", "--category", "basic", "--json"])
     out = capsys.readouterr().out
@@ -230,23 +230,24 @@ def test_cli_eval_exit_code_and_json(monkeypatch, capsys):
 
 
 def test_cli_eval_rejects_uninstalled_model(monkeypatch):
-    monkeypatch.setattr("hamllm.cli.OllamaClient.models", lambda self: ["other"])
+    monkeypatch.setattr("hamllm.cli.OllamaClient.installed", lambda self: {"other": ""})
     with pytest.raises(SystemExit):
         main(["eval", "--model", "m"])
 
 
 def test_cli_eval_save_writes_a_profile(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("HAMLLM_STATE_DIR", str(tmp_path))
-    monkeypatch.setattr("hamllm.cli.OllamaClient.models", lambda self: ["m"])
+    monkeypatch.setattr("hamllm.cli.OllamaClient.installed", lambda self: {"m": "sha-1"})
     monkeypatch.setattr("hamllm.evals.CASES", [BY_NAME["arithmetic"]])
     monkeypatch.setattr("hamllm.cli.OllamaClient.chat", basic_answer)
     assert main(["eval", "--model", "m", "--save", "--num-ctx", "4096"]) == 0
     saved = json.loads((tmp_path / "profiles.json").read_text())["m"]
     assert saved["categories"] == {"basic": 1.0} and saved["num_ctx"] == 4096 and saved["repeats"] == 1
+    assert saved["digest"] == "sha-1"
 
 
 def test_cli_eval_save_refuses_partial_suites(monkeypatch):
-    monkeypatch.setattr("hamllm.cli.OllamaClient.models", lambda self: ["m"])
+    monkeypatch.setattr("hamllm.cli.OllamaClient.installed", lambda self: {"m": "sha-1"})
     with pytest.raises(SystemExit):
         main(["eval", "--model", "m", "--save", "--category", "basic"])
 

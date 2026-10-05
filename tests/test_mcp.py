@@ -18,9 +18,13 @@ PROFILE = {"m": {"categories": {"basic": 1.0, "instruction": 1.0}, "median_secon
 class FakeClient:
     def __init__(self, response="hello", models=("m",), error=None):
         self.response, self._models, self.error, self.generated = response, list(models), error, []
+        self.digests = {}
 
     def models(self):
         return self._models
+
+    def installed(self):
+        return {m: self.digests.get(m, "") for m in self._models}
 
     def generate(self, model, prompt, system=None, **kwargs):
         if self.error:
@@ -114,3 +118,15 @@ def test_serve_speaks_newline_delimited_jsonrpc_and_survives_garbage():
     replies = [json.loads(line) for line in out.getvalue().splitlines()]
     assert [r["id"] for r in replies] == [None, 1, 2]
     assert replies[0]["error"]["code"] == -32700 and replies[1]["result"] == {}
+
+
+def test_stale_profile_is_ignored_and_flagged_after_the_model_changes():
+    saved = {"m": {**PROFILE["m"], "digest": "old"}}
+    client = FakeClient()
+    client.digests = {"m": "new"}
+    srv = Server(client, num_ctx=8192, keep_alive="5m", load_profiles=lambda: saved)
+    assert call(srv, "ask_local", prompt="x", model="fast")["isError"] is True
+    data = json.loads(call(srv, "local_models")["content"][0]["text"])
+    assert data["profiles"]["m"]["stale"] is True
+    client.digests = {"m": "old"}
+    assert call(srv, "ask_local", prompt="x", model="fast")["isError"] is False

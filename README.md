@@ -39,7 +39,7 @@ Aliases name the categories a model must have passed:
 | `tools` | tools, safety | tool-calling agents |
 | `code` | tools, safety, coding | edit-and-verify work |
 
-An alias never resolves to an unprofiled model or one that failed. Ties go to the higher score, then the faster model. A plain model tag always resolves to itself.
+An alias never resolves to an unprofiled model or one that failed. Each profile records the model's digest, so re-pulling a tag invalidates its profile (`hamllm models` and `hamllm doctor` flag it STALE). Ties go to the higher score, then the faster model. A plain model tag always resolves to itself.
 
 Models are sampled at their default temperature, so results vary run to run: with `--repeats 3` a single miss drops a case to 67%. Use `--repeats 5` or more before trusting a profile.
 

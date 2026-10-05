@@ -131,3 +131,22 @@ def test_options_reach_the_client_only_when_configured():
     AgentRuntime(client=tuned, model="m", options={"num_ctx": 8192}).run_turn([{"role": "user", "content": "x"}])
     assert "options" not in plain.kwargs[0]
     assert tuned.kwargs[0]["options"] == {"num_ctx": 8192}
+
+
+def test_approver_that_raises_is_a_denial_not_a_crash():
+    client = FakeClient([tool_call("write", {"path": "a"}), answer("not done")])
+    calls = []
+
+    def caller(name, arguments, *, allow_mutation=False):
+        calls.append(name)
+        return json.dumps({"ok": True})
+
+    def broken_approver(_name, _arguments):
+        raise RuntimeError("prompt UI crashed")
+
+    runtime = AgentRuntime(client=client, model="m",
+                           tools=ToolRegistry(caller=caller, mutating_tools=frozenset({"write"})))
+    messages = [{"role": "user", "content": "write"}]
+    assert runtime.run_turn(messages, approver=broken_approver) == "not done"
+    assert calls == []
+    assert "not approved" in messages[-2]["content"]

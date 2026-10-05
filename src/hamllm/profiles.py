@@ -42,11 +42,12 @@ def load(path: Path | None = None) -> dict[str, dict[str, Any]]:
     return data if isinstance(data, dict) else {}
 
 
-def save_report(report: dict[str, Any], path: Path | None = None) -> Path:
+def save_report(report: dict[str, Any], path: Path | None = None, *, digest: str | None = None) -> Path:
     """Merge one ``evals.report`` into the profile store (atomic replace)."""
     target = path or profiles_path()
     profiles = load(target)
     profiles[report["model"]] = {
+        "digest": digest or None,
         "evaluated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "ready": report["ready"],
         "threshold": report["threshold"],
@@ -78,14 +79,25 @@ def _score(profile: dict[str, Any], required: tuple[str, ...]) -> tuple[float, f
     return (-mean, profile.get("median_seconds") or float("inf"))
 
 
+def is_stale(profile: dict[str, Any], digest: str | None) -> bool:
+    """A profile describes the weights it was measured on; a changed digest voids it."""
+    return bool(digest and profile.get("digest") and profile["digest"] != digest)
+
+
 def resolve(
     name: str,
     installed: list[str],
     profiles: dict[str, dict[str, Any]],
     *,
     threshold: float = DEFAULT_THRESHOLD,
+    digests: dict[str, str] | None = None,
 ) -> str:
-    """Resolve a tag, ``default`` or an alias to an installed model tag."""
+    """Resolve a tag, ``default`` or an alias to an installed model tag.
+
+    ``digests`` (tag -> current digest) lets resolution ignore profiles measured on
+    weights that have since been replaced under the same tag.
+    """
+    digests = digests or {}
     if name == DEFAULT_ALIAS:
         name = config.default_model()
     if name in installed:
@@ -99,11 +111,13 @@ def resolve(
     candidates = [
         (model, profiles[model])
         for model in installed
-        if model in profiles and qualifies(profiles[model], required, threshold)
+        if model in profiles
+        and qualifies(profiles[model], required, threshold)
+        and not is_stale(profiles[model], digests.get(model))
     ]
     if not candidates:
         raise ResolutionError(
             f"no installed model has passed {', '.join(required)} at {threshold:.0%}; "
-            f"run `hamllm eval --save --model TAG` to profile one"
+            f"run `hamllm eval --save --model TAG` to profile one (profiles are ignored once a tag's digest changes)"
         )
     return min(candidates, key=lambda item: (*_score(item[1], required), item[0]))[0]

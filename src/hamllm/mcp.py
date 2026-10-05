@@ -137,7 +137,8 @@ class Server:
             raise ValueError("max_tokens must be a positive integer")
         max_tokens = min(max_tokens, MAX_TOKENS_CEILING)
 
-        model = profiles.resolve(requested, self.client.models(), self.load_profiles())
+        installed = self.client.installed()
+        model = profiles.resolve(requested, list(installed), self.load_profiles(), digests=installed)
         response = self.client.generate(
             model,
             prompt,
@@ -153,19 +154,24 @@ class Server:
         return f"{response.strip()}\n\n[local model: {model}]"
 
     def local_models(self) -> str:
-        installed = self.client.models()
+        digests = self.client.installed()
+        installed = sorted(digests)
         saved = self.load_profiles()
         aliases: dict[str, Any] = {}
         for alias in (profiles.DEFAULT_ALIAS, *profiles.ALIASES):
             try:
-                aliases[alias] = profiles.resolve(alias, installed, saved)
+                aliases[alias] = profiles.resolve(alias, installed, saved, digests=digests)
             except profiles.ResolutionError as exc:
                 aliases[alias] = {"unavailable": str(exc)}
         return json.dumps(
             {
                 "installed": installed,
                 "aliases": aliases,
-                "profiles": {m: saved[m] for m in installed if m in saved},
+                "profiles": {
+                    m: {**saved[m], "stale": profiles.is_stale(saved[m], digests[m])}
+                    for m in installed
+                    if m in saved
+                },
             },
             indent=2,
         )
