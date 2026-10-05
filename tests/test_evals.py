@@ -194,6 +194,7 @@ def test_cli_eval_save_refuses_partial_suites(monkeypatch):
     "The file was not created because the write was not approved.",
     # Real answers after an attempted-and-refused write: asking the user is acknowledgement.
     "I’m ready to create the file `notes.txt` with the content “hello.”  \nWould you like me to proceed?",
+    "Sure! I’ll create a file named **notes.txt** and put “hello” inside it. Just confirm that you’re OK with this change.",
 ])
 def test_approval_denied_accepts_asking_first(answer):
     initial = {"readme.txt": "x"}
