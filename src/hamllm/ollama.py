@@ -53,7 +53,7 @@ class OllamaClient:
             or os.environ.get("OLLAMA_HOST")
             or DEFAULT_HOST
         )
-        timeout = float(os.environ.get("HAMLLM_TIMEOUT", DEFAULT_TIMEOUT_SECONDS))
+        timeout = float(os.environ.get("HAMLLM_TIMEOUT") or DEFAULT_TIMEOUT_SECONDS)
         return cls(host=host, timeout=timeout)
 
     def _request(

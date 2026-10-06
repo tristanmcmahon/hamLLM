@@ -55,6 +55,17 @@ Zed hosts external agents over the Agent Client Protocol (Claude Code and Codex 
 ### D. Eval-gated routing
 Persist `hamllm eval --json` per model. `local_models()` and any router use it: delegate a category only if that model passed it recently. This stops the failure mode of trusting a model that cannot call tools.
 
+## First sweep on Helix (2026-10, `eval --all --repeats 3`)
+
+Seven models were READY at 80%: `gemma4:12b`, `helix-gemma`, `qwen3.6:27b`, `gpt-oss:20b`, `helix-gpt-oss`, `gwen:latest`, `helix-qwen`. What the three that weren't show about the suite and about local models:
+
+- `gemma3:12b`: Ollama rejects tool use outright ("does not support tools"). Fine for `fast` work, never for `tools` or `code`.
+- `qwen2.5-coder:14b`: accepts tools but writes the call as plain JSON text instead of a native tool call, so no tool case can pass. The eval now says so in the failure reason.
+- `deepseek-r1:8b`: long reasoning blew the request timeout. That sweep wrongly used the MCP 120s timeout for every command (fixed: 300s, MCP 120s), so re-run it before judging.
+- Latency spans 0.4s (small models) to ~28s median (`qwen3.6:27b`) and ~50s (`helix-qwen`); that is what `fast` versus `code` aliases should trade off.
+
+Results at 3 repeats are coarse. Re-run the finalists with `--repeats 5` or more before relying on a profile.
+
 ## Status of the prerequisites
 
 1. **Context control: done.** `options` and `keep_alive` pass through `OllamaClient`; `AgentRuntime(options=...)` forwards them only when set, so older fake clients keep working. hamLLM defaults to a 16k window instead of Ollama's silent 4k.

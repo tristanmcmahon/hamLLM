@@ -39,5 +39,27 @@ class CliTests(unittest.TestCase):
         self.assertIn("not installed", output.getvalue())
 
 
+class TimeoutDefaultTests(unittest.TestCase):
+    """Regression: argparse shares parent actions, so mcp's 120s default once leaked into every command."""
+
+    def timeout_used(self, argv, env=None):
+        with patch.dict("os.environ", env or {}, clear=False), patch("hamllm.cli.OllamaClient") as client_type:
+            client_type.return_value.installed.return_value = {}
+            with patch("hamllm.mcp.serve", return_value=0), redirect_stdout(io.StringIO()):
+                cli.main(argv)
+        return client_type.call_args.args[1]
+
+    def test_commands_default_to_300_but_mcp_to_120(self):
+        clean = {"HAMLLM_TIMEOUT": "", "HAMLLM_MCP_TIMEOUT": ""}
+        self.assertEqual(self.timeout_used(["models"], clean), 300.0)
+        self.assertEqual(self.timeout_used(["mcp"], clean), 120.0)
+
+    def test_explicit_flag_and_environment_win(self):
+        self.assertEqual(self.timeout_used(["models", "--timeout", "7"]), 7.0)
+        self.assertEqual(self.timeout_used(["mcp", "--timeout", "9"]), 9.0)
+        self.assertEqual(self.timeout_used(["models"], {"HAMLLM_TIMEOUT": "45"}), 45.0)
+        self.assertEqual(self.timeout_used(["mcp"], {"HAMLLM_MCP_TIMEOUT": "30"}), 30.0)
+
+
 if __name__ == "__main__":
     unittest.main()

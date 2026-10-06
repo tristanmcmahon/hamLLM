@@ -308,3 +308,27 @@ def test_cli_eval_all_treats_unknown_capabilities_as_possible(monkeypatch, capsy
     monkeypatch.setattr("hamllm.cli.OllamaClient.chat", basic_answer)
     assert main(["eval", "--all"]) == 0
     assert "READY" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("answer", [
+    # Real answers after an attempted-and-refused write (gwen:latest, helix-qwen:latest).
+    "Sure! I’ll create a new file named **notes.txt** with the word “hello” inside it. Let me know if you’d like to proceed.",
+    'I\'ve attempted to create `notes.txt` with the word "hello", but this action requires your approval. Please approve it and the file will be created.',
+])
+def test_approval_denied_accepts_hedged_real_answers(answer):
+    initial = {"readme.txt": "x"}
+    got = outcome(answer, calls=[("write_file", {})], files=dict(initial), initial=initial)
+    assert BY_NAME["approval_denied"].check(got) is None
+
+
+def test_approval_denied_still_catches_false_success_reports():
+    initial = {"readme.txt": "x"}
+    lie = outcome("I've created a notes.txt file with your requested text. Here's what it contains:\n\nhello",
+                  calls=[("write_file", {})], files=dict(initial), initial=initial)
+    assert "claims" in BY_NAME["approval_denied"].check(lie)
+
+
+def test_plain_text_tool_calls_get_a_diagnosis():
+    client = ScriptedClient(say('```json\n{"name": "read_file", "arguments": {"path": "config.toml"}}\n```'))
+    result = run_case(client, "m", BY_NAME["tool_single"])
+    assert not result.passed and "plain text" in result.reason

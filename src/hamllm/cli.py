@@ -8,13 +8,16 @@ from typing import Sequence
 
 from . import __version__, config, profiles
 from .config import DEFAULT_MODEL  # noqa: F401  (re-exported for callers)
-from .ollama import DEFAULT_HOST, OllamaClient, OllamaError
+from .ollama import DEFAULT_HOST, DEFAULT_TIMEOUT_SECONDS, OllamaClient, OllamaError
 
 MCP_TIMEOUT_SECONDS = 120.0
 
 
-def _client(args: argparse.Namespace) -> OllamaClient:
-    return OllamaClient(args.host, args.timeout)
+def _client(args: argparse.Namespace, *, default_timeout: float | None = None) -> OllamaClient:
+    timeout = args.timeout
+    if timeout is None:
+        timeout = default_timeout or float(os.environ.get("HAMLLM_TIMEOUT") or DEFAULT_TIMEOUT_SECONDS)
+    return OllamaClient(args.host, timeout)
 
 
 def _options(args: argparse.Namespace) -> dict[str, int]:
@@ -134,9 +137,12 @@ def _eval_one(client: OllamaClient, model: str, digest: str, cases: list, args: 
             f"{passed}/{len(summary.runs)}  {summary.median_seconds:.1f}s",
             file=out,
         )
+        reasons: dict[str, int] = {}
         for run in summary.runs:
             if not run.passed:
-                print(f"      {run.reason}", file=out)
+                reasons[run.reason or "failed"] = reasons.get(run.reason or "failed", 0) + 1
+        for reason, count in reasons.items():
+            print(f"      {reason}" + (f"  (x{count})" if count > 1 else ""), file=out)
 
     summaries = evals.run_suite(
         client, model, cases=cases, repeats=args.repeats,
@@ -202,7 +208,8 @@ def evaluate(args: argparse.Namespace) -> int:
 def mcp_server(args: argparse.Namespace) -> int:
     from .mcp import Server, serve
 
-    return serve(Server(_client(args), num_ctx=args.num_ctx))
+    mcp_timeout = float(os.environ.get("HAMLLM_MCP_TIMEOUT") or MCP_TIMEOUT_SECONDS)
+    return serve(Server(_client(args, default_timeout=mcp_timeout), num_ctx=args.num_ctx))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -224,7 +231,8 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument(
         "--timeout",
         type=float,
-        default=float(os.environ.get("HAMLLM_TIMEOUT", "300")),
+        default=None,
+        help="request timeout in seconds (env HAMLLM_TIMEOUT, default 300; 120 for mcp via HAMLLM_MCP_TIMEOUT)",
     )
     common.add_argument(
         "--num-ctx",
@@ -281,10 +289,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve = commands.add_parser(
         "mcp", parents=[common], help="serve local models to MCP clients over stdio"
     )
-    serve.set_defaults(
-        handler=mcp_server,
-        timeout=float(os.environ.get("HAMLLM_MCP_TIMEOUT", MCP_TIMEOUT_SECONDS)),
-    )
+    serve.set_defaults(handler=mcp_server)
     return parser
 
 
