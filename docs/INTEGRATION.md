@@ -76,6 +76,16 @@ Lessons for the suite itself:
 - 3 repeats is coarse. Alias ranking now uses a Wilson lower bound on each category rate, so 25 clean trials outrank 9, and a lucky 3-for-3 cannot beat a steady 97% over 100.
 - Timeouts matter: a reasoning model can spend minutes on a case. The default is 300s per request (MCP 120s).
 
+## Can offload be automatic?
+
+Partly, depending on who decides:
+
+1. **The calling model decides** (works with `hamllm mcp` registered; not guaranteed). Raise the rate with a rule in `CLAUDE.md` (Claude Code) or `AGENTS.md` (Codex): "use `ask_local` first for summaries, commit messages, classification and log triage". Untested in practice.
+2. **A rule decides** (fully automatic, no model choice): shell hooks such as a git `prepare-commit-msg` calling `hamllm run --model fast`, or a log summariser. Only covers jobs named in advance.
+3. **A gateway routes every request** (not recommended): needs a judgement of "easy" before answering, silently degrades results when wrong, and small models struggle with large agent prompts.
+
+Recommended: 1 plus 2 for the few repetitive jobs. To know whether clients really offload, add a usage log (time, model, latency, counts, never prompts); not built yet.
+
 ## Status of the prerequisites
 
 1. **Context control: done.** `options` and `keep_alive` pass through `OllamaClient`; `AgentRuntime(options=...)` forwards them only when set, so older fake clients keep working. hamLLM defaults to a 16k window instead of Ollama's silent 4k.
