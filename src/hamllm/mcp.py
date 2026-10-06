@@ -28,6 +28,14 @@ INSTRUCTIONS = (
     "hard reasoning, and verify its output before relying on it."
 )
 
+# The caller is another AI agent, not a person: a menu of options or a chatty preamble just
+# wastes the cloud model's context. Callers can override with their own `system`.
+DEFAULT_SYSTEM = (
+    "You are a local worker model called by another AI agent. Reply with only the requested "
+    "output: no preamble, no alternatives or options unless asked, no closing remarks. If the "
+    "task is ambiguous, pick the most reasonable interpretation and answer it."
+)
+
 TOOLS: list[dict[str, Any]] = [
     {
         "name": "ask_local",
@@ -130,6 +138,7 @@ class Server:
         system = arguments.get("system")
         if system is not None and not isinstance(system, str):
             raise ValueError("system must be a string")
+        system = system or DEFAULT_SYSTEM
         requested = arguments.get("model") or profiles.DEFAULT_ALIAS
         if not isinstance(requested, str):
             raise ValueError("model must be a string")
@@ -147,7 +156,7 @@ class Server:
                 f"{model} is installed but has never been profiled, so it is not offered over MCP; "
                 f"run `hamllm eval --save --model {model}` first"
             )
-        estimated = (len(prompt) + len(system or "")) // CHARS_PER_TOKEN
+        estimated = (len(prompt) + len(system)) // CHARS_PER_TOKEN
         if estimated > self.num_ctx:
             raise ValueError(
                 f"prompt is about {estimated} tokens but the local window is {self.num_ctx}; "
@@ -168,27 +177,28 @@ class Server:
         return f"{response.strip()}\n\n[local model: {model}]"
 
     def local_models(self) -> str:
+        """A compact summary: this lands in a cloud model's context, so every token counts."""
         digests = self.client.installed()
         installed = sorted(digests)
         saved = self.load_profiles()
-        aliases: dict[str, Any] = {}
+        lines = []
         for alias in (profiles.DEFAULT_ALIAS, *profiles.ALIASES):
             try:
-                aliases[alias] = profiles.resolve(alias, installed, saved, digests=digests)
-            except profiles.ResolutionError as exc:
-                aliases[alias] = {"unavailable": str(exc)}
-        return json.dumps(
-            {
-                "installed": installed,
-                "aliases": aliases,
-                "profiles": {
-                    m: {**saved[m], "stale": profiles.is_stale(saved[m], digests[m])}
-                    for m in installed
-                    if m in saved
-                },
-            },
-            indent=2,
-        )
+                lines.append(f"{alias} -> {profiles.resolve(alias, installed, saved, digests=digests)}")
+            except profiles.ResolutionError:
+                lines.append(f"{alias} -> unavailable (no profiled model qualifies)")
+        profiled = [m for m in installed if m in saved]
+        profiled.sort(key=lambda m: (not saved[m].get("ready"), saved[m].get("median_seconds") or 1e9, m))
+        for model in profiled:
+            profile = saved[model]
+            state = "STALE" if profiles.is_stale(profile, digests[model]) else ("ready" if profile.get("ready") else "not ready")
+            rates = " ".join(f"{c} {round(r * 100)}" for c, r in (profile.get("categories") or {}).items())
+            median = profile.get("median_seconds")
+            lines.append(f"{model}: {state}; {rates}; median {median}s" if median else f"{model}: {state}; {rates}")
+        unprofiled = [m for m in installed if m not in saved]
+        if unprofiled:
+            lines.append("not profiled (not offered): " + ", ".join(unprofiled))
+        return "\n".join(lines)
 
 
 def _ok(msg_id: Any, result: dict[str, Any]) -> dict[str, Any]:

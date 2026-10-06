@@ -12,7 +12,7 @@ def default_model(monkeypatch):
     monkeypatch.setenv("HAMLLM_MODEL", "m")
 
 
-PROFILE = {"m": {"categories": {"basic": 1.0, "instruction": 1.0}, "median_seconds": 1.0}}
+PROFILE = {"m": {"ready": True, "categories": {"basic": 1.0, "instruction": 1.0}, "median_seconds": 1.0}}
 
 
 class FakeClient:
@@ -98,11 +98,38 @@ def test_unknown_tool_is_a_protocol_error():
     assert rpc(server(), "tools/call", {"name": "rm_rf", "arguments": {}})["error"]["code"] == -32602
 
 
-def test_local_models_reports_aliases_and_unavailable_reasons():
-    data = json.loads(call(server(), "local_models")["content"][0]["text"])
-    assert data["installed"] == ["m"] and data["profiles"].keys() == {"m"}
-    assert data["aliases"]["fast"] == "m"
-    assert "unavailable" in data["aliases"]["code"]
+def test_local_models_is_a_compact_summary():
+    client = FakeClient(models=["m", "raw"])
+    text = call(server(client), "local_models")["content"][0]["text"]
+    assert "fast -> m" in text and "code -> unavailable" in text
+    assert "m: ready; basic 100 instruction 100; median 1.0s" in text
+    assert "not profiled (not offered): raw" in text
+    assert "digest" not in text and "{" not in text
+    assert len(text) < 600  # this goes into a cloud model's context
+
+
+def test_local_models_flags_stale_profiles_and_orders_ready_first():
+    saved = {
+        "slow": {"ready": True, "categories": {"basic": 1.0}, "median_seconds": 9.0},
+        "fast": {"ready": True, "categories": {"basic": 1.0}, "median_seconds": 1.0},
+        "bad": {"ready": False, "categories": {"basic": 0.2}, "median_seconds": 0.5},
+        "old": {"ready": True, "categories": {"basic": 1.0}, "digest": "x", "median_seconds": 0.1},
+    }
+    client = FakeClient(models=["slow", "fast", "bad", "old"])
+    client.digests = {"old": "y"}
+    srv = Server(client, num_ctx=8192, keep_alive="5m", load_profiles=lambda: saved)
+    lines = call(srv, "local_models")["content"][0]["text"].splitlines()
+    order = [ln.split(":")[0] for ln in lines if ": " in ln and not ln.startswith("not profiled")]
+    assert order == ["old", "fast", "slow", "bad"]  # ready first (fastest first); not-ready last
+    assert any(ln.startswith("old: STALE") for ln in lines)
+
+
+def test_ask_local_defaults_to_a_terse_system_prompt_but_callers_can_override():
+    client = FakeClient()
+    call(server(client), "ask_local", prompt="x")
+    assert client.generated[-1]["system"] == mcp.DEFAULT_SYSTEM
+    call(server(client), "ask_local", prompt="x", system="Answer in French.")
+    assert client.generated[-1]["system"] == "Answer in French."
 
 
 def test_serve_speaks_newline_delimited_jsonrpc_and_survives_garbage():
@@ -126,8 +153,7 @@ def test_stale_profile_is_ignored_and_flagged_after_the_model_changes():
     client.digests = {"m": "new"}
     srv = Server(client, num_ctx=8192, keep_alive="5m", load_profiles=lambda: saved)
     assert call(srv, "ask_local", prompt="x", model="fast")["isError"] is True
-    data = json.loads(call(srv, "local_models")["content"][0]["text"])
-    assert data["profiles"]["m"]["stale"] is True
+    assert "\nm: STALE;" in call(srv, "local_models")["content"][0]["text"]
     client.digests = {"m": "old"}
     assert call(srv, "ask_local", prompt="x", model="fast")["isError"] is False
 
