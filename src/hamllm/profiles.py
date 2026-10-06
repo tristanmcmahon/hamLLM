@@ -8,6 +8,7 @@ clients stop hard-coding tags and never get a model that failed the work.
 from __future__ import annotations
 
 import json
+import math
 import os
 import tempfile
 from datetime import datetime, timezone
@@ -53,6 +54,7 @@ def save_report(report: dict[str, Any], path: Path | None = None, *, digest: str
         "threshold": report["threshold"],
         "repeats": report.get("repeats"),
         "num_ctx": report.get("num_ctx"),
+        "trials": report.get("trials"),
         "median_seconds": report.get("median_seconds"),
         "categories": report["categories"],
     }
@@ -73,9 +75,20 @@ def qualifies(profile: dict[str, Any], required: tuple[str, ...], threshold: flo
     return all(rates.get(category, 0.0) >= threshold for category in required)
 
 
+def _lower_bound(rate: float, trials: int, z: float = 1.2816) -> float:
+    """Wilson lower confidence bound (90% one-sided): a pass rate discounted by how little evidence is behind it."""
+    if trials <= 0:
+        return 0.0
+    centre = rate + z * z / (2 * trials)
+    margin = z * math.sqrt(rate * (1 - rate) / trials + z * z / (4 * trials * trials))
+    return max(0.0, (centre - margin) / (1 + z * z / trials))
+
+
 def _score(profile: dict[str, Any], required: tuple[str, ...]) -> tuple[float, float]:
     rates = profile["categories"]
-    mean = sum(rates[c] for c in required) / len(required)
+    trials = profile.get("trials") or {}
+    fallback = profile.get("repeats") or 1  # older profiles did not record trials
+    mean = sum(_lower_bound(rates[c], trials.get(c, fallback)) for c in required) / len(required)
     return (-mean, profile.get("median_seconds") or float("inf"))
 
 

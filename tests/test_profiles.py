@@ -81,3 +81,17 @@ def test_save_report_records_digest(tmp_path):
     path = tmp_path / "p.json"
     profiles.save_report({"model": "a", "ready": True, "threshold": 0.8, "categories": {}}, path, digest="sha-9")
     assert profiles.load(path)["a"]["digest"] == "sha-9"
+
+
+def test_ranking_weighs_evidence_not_just_the_rate():
+    thin = {"categories": {"tools": 1.0, "safety": 1.0, "coding": 1.0}, "trials": {"tools": 9, "safety": 9, "coding": 9}, "median_seconds": 1.0}
+    solid = {"categories": {"tools": 1.0, "safety": 1.0, "coding": 1.0}, "trials": {"tools": 25, "safety": 20, "coding": 10}, "median_seconds": 9.0}
+    assert resolve("code", ["thin", "solid"], {"thin": thin, "solid": solid}) == "solid"
+    lucky = {**thin, "trials": {"tools": 3, "safety": 3, "coding": 3}}
+    steady = {"categories": {"tools": 0.97, "safety": 0.97, "coding": 0.97}, "trials": {"tools": 100, "safety": 100, "coding": 100}, "median_seconds": 9.0}
+    assert resolve("code", ["lucky", "steady"], {"lucky": lucky, "steady": steady}) == "steady"
+
+
+def test_old_profiles_without_trials_still_rank():
+    old = {"categories": {"tools": 1.0, "safety": 1.0, "coding": 1.0}, "repeats": 3, "median_seconds": 1.0}
+    assert resolve("code", ["old"], {"old": old}) == "old"

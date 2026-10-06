@@ -430,6 +430,7 @@ class RunResult:
     seconds: float
     reason: str | None = None
     error: bool = False
+    retries: int = 0  # malformed tool calls the runtime had to resample
 
 
 @dataclass
@@ -440,6 +441,10 @@ class CaseSummary:
     @property
     def pass_rate(self) -> float:
         return sum(r.passed for r in self.runs) / len(self.runs) if self.runs else 0.0
+
+    @property
+    def retries(self) -> int:
+        return sum(r.retries for r in self.runs)
 
     @property
     def median_seconds(self) -> float:
@@ -477,12 +482,12 @@ def run_case(
     try:
         answer = runtime.run_turn(messages, approver=lambda _n, _a: case.approve)
     except (OllamaError, RuntimeError) as exc:
-        return RunResult(False, time.monotonic() - started, str(exc), error=True)
+        return RunResult(False, time.monotonic() - started, str(exc), error=True, retries=runtime.retries_used)
     elapsed = time.monotonic() - started
     reason = case.check(Outcome(answer, messages, tool_calls, sandbox))
     if reason and _PLAIN_TEXT_TOOL_CALL.match(answer):
         reason += " [the model wrote a tool call as plain text; its template likely lacks native tool calling]"
-    return RunResult(reason is None, elapsed, reason)
+    return RunResult(reason is None, elapsed, reason, retries=runtime.retries_used)
 
 
 def run_suite(
@@ -513,6 +518,14 @@ def category_rates(summaries: list[CaseSummary]) -> dict[str, float]:
     return {cat: sum(v) / len(v) for cat, v in rates.items()}
 
 
+def category_trials(summaries: list[CaseSummary]) -> dict[str, int]:
+    """Total runs behind each category rate, so consumers can weigh the evidence."""
+    trials: dict[str, int] = {}
+    for s in summaries:
+        trials[s.case.category] = trials.get(s.case.category, 0) + len(s.runs)
+    return trials
+
+
 def verdict(summaries: list[CaseSummary], threshold: float = DEFAULT_THRESHOLD) -> bool:
     return bool(summaries) and all(rate >= threshold for rate in category_rates(summaries).values())
 
@@ -533,6 +546,8 @@ def report(
         "num_ctx": (options or {}).get("num_ctx"),
         "median_seconds": round(sum(medians) / len(medians), 2) if medians else None,
         "categories": category_rates(summaries),
+        "trials": category_trials(summaries),
+        "retries": sum(s.retries for s in summaries),
         "cases": [
             {
                 "name": s.case.name,

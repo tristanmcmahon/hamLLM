@@ -36,7 +36,23 @@ class CliTests(unittest.TestCase):
         with redirect_stdout(output):
             result = cli.main(["doctor", "--model", "gpt-oss:20b"])
         self.assertEqual(result, 1)
-        self.assertIn("not installed", output.getvalue())
+        self.assertIn("not an installed model", output.getvalue())
+
+
+class DoctorAliasTests(unittest.TestCase):
+    @patch("hamllm.cli.profiles.load")
+    @patch("hamllm.cli.OllamaClient")
+    def test_doctor_resolves_an_alias_default(self, client_type, load):
+        client = client_type.return_value
+        client.version.return_value = "0.11.0"
+        client.installed.return_value = {"gemma4:12b": "sha"}
+        load.return_value = {"gemma4:12b": {"ready": True, "digest": "sha", "evaluated_at": "t",
+                                           "categories": {"tools": 1.0, "safety": 1.0, "coding": 1.0}}}
+        output = io.StringIO()
+        with redirect_stdout(output):
+            result = cli.main(["doctor", "--model", "code"])
+        self.assertEqual(result, 0)
+        self.assertIn("code -> gemma4:12b", output.getvalue())
 
 
 class TimeoutDefaultTests(unittest.TestCase):

@@ -103,12 +103,19 @@ def doctor(args: argparse.Namespace) -> int:
             print(f"FAIL  {exc}")
         return 1
 
-    healthy = args.model in models
+    try:
+        model = profiles.resolve(args.model, models, profiles.load(), digests=installed)
+    except profiles.ResolutionError as exc:
+        model, problem = args.model, str(exc)
+    else:
+        problem = None
+    healthy = problem is None
     payload = {
         "healthy": healthy,
         "host": args.host,
         "ollama_version": version,
         "model": args.model,
+        "resolved_model": model if healthy else None,
         "model_installed": healthy,
         "models": models,
     }
@@ -116,13 +123,11 @@ def doctor(args: argparse.Namespace) -> int:
         print(json.dumps(payload))
     else:
         print(f"PASS  Ollama {version} at {args.host}")
-        state = "PASS" if healthy else "FAIL"
-        detail = "installed" if healthy else "not installed"
-        print(f"{state}  {args.model}: {detail}")
+        label = args.model if model == args.model else f"{args.model} -> {model}"
+        print(f"{'PASS' if healthy else 'FAIL'}  {label}: {'installed' if healthy else problem}")
         if healthy:
-            print(f"INFO  profile: {_profile_summary(profiles.load().get(args.model), installed[args.model])}")
+            print(f"INFO  profile: {_profile_summary(profiles.load().get(model), installed[model])}")
     return 0 if healthy else 1
-
 
 def _eval_one(client: OllamaClient, model: str, digest: str, cases: list, args: argparse.Namespace, out) -> dict:
     from . import evals
@@ -134,7 +139,8 @@ def _eval_one(client: OllamaClient, model: str, digest: str, cases: list, args: 
         state = "PASS" if summary.pass_rate >= args.threshold else "FAIL"
         print(
             f"{state}  {summary.case.category}/{summary.case.name}  "
-            f"{passed}/{len(summary.runs)}  {summary.median_seconds:.1f}s",
+            f"{passed}/{len(summary.runs)}  {summary.median_seconds:.1f}s"
+            + (f"  ({summary.retries} tool-call retries)" if summary.retries else ""),
             file=out,
         )
         reasons: dict[str, int] = {}

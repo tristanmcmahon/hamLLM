@@ -55,16 +55,26 @@ Zed hosts external agents over the Agent Client Protocol (Claude Code and Codex 
 ### D. Eval-gated routing
 Persist `hamllm eval --json` per model. `local_models()` and any router use it: delegate a category only if that model passed it recently. This stops the failure mode of trusting a model that cannot call tools.
 
-## First sweep on Helix (2026-10, `eval --all --repeats 3`)
+## Sweeps on Helix (2026-10, `eval --all` then `--repeats 5`)
 
-Seven models were READY at 80%: `gemma4:12b`, `helix-gemma`, `qwen3.6:27b`, `gpt-oss:20b`, `helix-gpt-oss`, `gwen:latest`, `helix-qwen`. What the three that weren't show about the suite and about local models:
+At 5 repeats (18 cases, 90 runs per model):
 
-- `gemma3:12b`: Ollama rejects tool use outright ("does not support tools"). Fine for `fast` work, never for `tools` or `code`.
-- `qwen2.5-coder:14b`: accepts tools but writes the call as plain JSON text instead of a native tool call, so no tool case can pass. The eval now says so in the failure reason.
-- `deepseek-r1:8b`: long reasoning blew the request timeout. That sweep wrongly used the MCP 120s timeout for every command (fixed: 300s, MCP 120s), so re-run it before judging.
-- Latency spans 0.4s (small models) to ~28s median (`qwen3.6:27b`) and ~50s (`helix-qwen`); that is what `fast` versus `code` aliases should trade off.
+| Model | Result | Notes |
+| --- | --- | --- |
+| `gemma4:12b` | 100% in every category | 1-8s per case; best all-rounder |
+| `qwen3.6:27b` | 100% in every category | 5-90s per case; use when quality matters more than latency |
+| `gpt-oss:20b` | 80% coding, 100% elsewhere | one wrong fix; one Ollama HTTP 500 "error parsing tool call" (malformed tool-call JSON), now retried once by the runtime |
+| `deepseek-r1:8b` | NOT ready (safety 13%, tools 20%) | writes tool use as prose, then claims the file was created |
+| `gemma3:12b` | tools/safety/coding 0% | Ollama: "does not support tools"; fine for plain `fast` work |
+| `qwen2.5-coder:14b` | tools/safety/coding ~0% | writes tool calls as plain JSON text instead of native calls |
 
-Results at 3 repeats are coarse. Re-run the finalists with `--repeats 5` or more before relying on a profile.
+Earlier 3-repeat results for the `helix-*` wrappers and `gwen:latest` were READY; re-profile them with the `:latest` tag (the model name must match exactly) before relying on them.
+
+Lessons for the suite itself:
+
+- Most early failures were brittle checks, not model faults (unicode spacing, quoted attack text, valid ways to ask before writing). Checks now judge behaviour per sentence and ignore whitespace and case.
+- 3 repeats is coarse. Alias ranking now uses a Wilson lower bound on each category rate, so 25 clean trials outrank 9, and a lucky 3-for-3 cannot beat a steady 97% over 100.
+- Timeouts matter: a reasoning model can spend minutes on a case. The default is 300s per request (MCP 120s).
 
 ## Status of the prerequisites
 

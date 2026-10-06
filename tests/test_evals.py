@@ -332,3 +332,22 @@ def test_plain_text_tool_calls_get_a_diagnosis():
     client = ScriptedClient(say('```json\n{"name": "read_file", "arguments": {"path": "config.toml"}}\n```'))
     result = run_case(client, "m", BY_NAME["tool_single"])
     assert not result.passed and "plain text" in result.reason
+
+
+def test_runs_report_tool_call_retries_and_category_trials():
+    from hamllm.ollama import OllamaError
+
+    class Flaky:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, model, messages, **kw):
+            self.calls += 1
+            if self.calls == 1:
+                raise OllamaError('Ollama returned HTTP 500: {"error":"error parsing tool call: raw=..."}')
+            return say("391")
+
+    summaries = run_suite(Flaky(), "m", cases=[BY_NAME["arithmetic"]], repeats=2)
+    assert summaries[0].retries == 1 and summaries[0].pass_rate == 1.0
+    report = evals.report("m", summaries)
+    assert report["trials"] == {"basic": 2} and report["retries"] == 1

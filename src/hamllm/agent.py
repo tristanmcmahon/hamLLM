@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from .ollama import OllamaClient
+from .ollama import OllamaClient, OllamaError
 
 ToolApprover = Callable[[str, dict[str, Any]], bool]
 ToolObserver = Callable[[str, dict[str, Any]], None]
@@ -49,18 +49,29 @@ class AgentRuntime:
     safe_policy_fallback: str = SAFE_POLICY_FALLBACK
     tool_observer: ToolObserver | None = None
     options: dict[str, Any] | None = None
+    # Ollama answers HTTP 500 "error parsing tool call" when a model emits malformed
+    # tool-call JSON. Resampling usually fixes it, so retry rather than lose the turn.
+    tool_parse_retries: int = 1
+    retries_used: int = field(default=0, init=False)
 
     def _chat(self, messages: list[dict[str, Any]], *, allow_tools: bool = True) -> dict[str, Any]:
         schemas = self.tools.schemas if allow_tools and self.tools.schemas else None
         # Only forwarded when set, so clients that predate `options` keep working.
         extra = {"options": self.options} if self.options else {}
-        return self.client.chat(
-            self.model,
-            messages,
-            tools=schemas,
-            think=self.reasoning,
-            **extra,
-        )
+        for attempt in range(self.tool_parse_retries + 1):
+            try:
+                return self.client.chat(
+                    self.model,
+                    messages,
+                    tools=schemas,
+                    think=self.reasoning,
+                    **extra,
+                )
+            except OllamaError as exc:
+                if attempt >= self.tool_parse_retries or "error parsing tool call" not in str(exc):
+                    raise
+                self.retries_used += 1
+        raise AssertionError("unreachable")
 
     @staticmethod
     def _safe_approver(approver: ToolApprover | None) -> ToolApprover:
