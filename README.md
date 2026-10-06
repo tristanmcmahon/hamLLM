@@ -50,19 +50,31 @@ The same cases run as pytest tests: `HAMLLM_LIVE=1 python -m pytest tests/test_l
 
 Standard-library stdio server, read-only: `ask_local(prompt, system?, model?, max_tokens?)` and `local_models()`. Every call sets a deliberate context window (`num_ctx`), an output cap and `keep_alive`, so clients cannot thrash VRAM or hold the GPU. Failures come back as tool errors, so the calling model can fall back. Two guards bound what a calling client can make the GPU do: prompts that clearly overflow the context window are rejected rather than silently truncated, and only the default model or a profiled model can be loaded (an installed-but-unprofiled tag is refused).
 
+Use an absolute path to `hamllm` (for example `./result/bin/hamllm` after `nix-build`) if it is not on the PATH of the client that launches it. To point at a non-default Ollama, add `HAMLLM_HOST`.
+
 ```bash
-claude mcp add hamllm -- hamllm mcp                 # Claude Code
+# Claude Code: --scope user makes it available in every project
+claude mcp add --scope user hamllm -- hamllm mcp
+claude mcp add --scope user --env HAMLLM_HOST=http://helix:11434 hamllm -- hamllm mcp   # remote Ollama
+```
+```bash
+# Codex
+codex mcp add hamllm -- hamllm mcp
 ```
 ```toml
-# Codex: ~/.codex/config.toml
+# ...or by hand in ~/.codex/config.toml
 [mcp_servers.hamllm]
 command = "hamllm"
 args = ["mcp"]
 ```
 ```jsonc
-// Zed: settings.json (check current Zed docs for the exact key)
-"context_servers": { "hamllm": { "command": "hamllm", "args": ["mcp"] } }
+// Zed: settings.json (or Settings -> AI -> MCP Servers -> Add Local Server)
+"context_servers": {
+  "hamllm": { "command": "hamllm", "args": ["mcp"], "env": {} }
+}
 ```
+
+Claude Code, Codex and Zed docs were checked on 2026-10-06 (Zed's via search summaries, since its docs site was unreachable from the sandbox). If Zed does not load the server, older versions used a nested form: `"command": { "path": "hamllm", "args": ["mcp"] }`. Claude Code's per-tool timeout is far longer than the server's 120s cap, so slow models time out inside hamLLM first and return a clean tool error.
 
 Offloading is not privacy: the prompt comes from the calling client and the answer returns to it.
 

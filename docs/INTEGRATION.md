@@ -1,7 +1,7 @@
 # Integrating local models with Claude, Codex and Zed
 
 Status: capability evals, profiles/aliases and the stdio MCP server (option B) are implemented. Options C and D below are still design only.
-Zed, ACP, Codex and Claude Code details below are from memory and move quickly: check each against current docs before building.
+MCP registration for Claude Code, Codex and Zed was checked against current docs on 2026-10-06 (see the README). ACP details below are from memory and move quickly: check them before building.
 
 ## Step zero: find out what the local model can do
 
