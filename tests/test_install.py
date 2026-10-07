@@ -16,7 +16,25 @@ def env(tmp_path):
     stubs.mkdir()
     for name in ("claude", "codex"):
         stub = stubs / name
-        stub.write_text(f'#!/bin/sh\necho "{name} $*" >> "$STUB_LOG"\n')
+        # Mimic real CLI behaviour that bit us: Claude's --env is variadic, so a bare word
+        # after it (e.g. the server name) is swallowed as a KEY=VALUE and rejected.
+        stub.write_text(
+            f'''#!/bin/sh
+echo "{name} $*" >> "$STUB_LOG"
+[ "${{STUB_FAIL:-}}" = "{name}" ] && {{ echo "boom" >&2; exit 1; }}
+if [ "{name}" = claude ]; then
+  mode=""
+  for a in "$@"; do
+    case "$a" in
+      --) break ;;
+      --env|-e) mode=env ;;
+      -*) mode="" ;;
+      *) if [ "$mode" = env ]; then case "$a" in *=*) ;; *) echo "Invalid environment variable format: $a" >&2; exit 1 ;; esac; fi ;;
+    esac
+  done
+fi
+'''
+        )
         stub.chmod(0o755)
     home = tmp_path / "home"
     home.mkdir()
@@ -125,3 +143,16 @@ def test_paths_with_spaces_work(env, tmp_path):
     install({**env, "PREFIX": str(prefix)}, "--no-mcp")
     out = subprocess.run([str(prefix / "bin" / "hamllm"), "--version"], capture_output=True, text=True, env=env)
     assert out.returncode == 0, shlex.quote(out.stderr)
+
+
+def test_a_failed_registration_is_reported_and_fails_the_install_but_not_the_other_client(env):
+    result = install({**env, "STUB_FAIL": "claude"}, check=False)
+    assert result.returncode == 1
+    assert "WARN: registering with Claude Code failed" in result.stdout
+    assert "claude mcp add" in result.stdout  # the manual command is printed
+    assert any(c.startswith("codex mcp add") for c in calls(env))  # codex still registered
+    assert Path(env["PREFIX"], "bin", "hamllm").exists()
+
+
+def test_env_flag_is_not_followed_by_the_bare_server_name(env):
+    install(env, "--claude")  # the stub rejects `--env K=V hamllm` like real Claude Code

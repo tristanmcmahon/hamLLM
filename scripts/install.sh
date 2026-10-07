@@ -16,6 +16,7 @@ REPEATS=5
 DRY=0 UNINSTALL=0 DO_MCP=1 DO_INSTRUCTIONS=0 PROFILE_ALL=0
 PROFILE_MODELS=()
 ONLY=""
+failed=()
 
 usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; cat <<'EOF'
 
@@ -138,16 +139,23 @@ fi
 # 4. register the MCP server
 if [ "$DO_MCP" = 1 ]; then
   env_args=(); while IFS= read -r -d '' a; do env_args+=("$a"); done < <(mcp_env_args)
-  registered=0
+  registered=0 failed=()
   if have claude && wants claude; then
     say "== Claude Code"
     [ "$DRY" = 1 ] || claude mcp remove --scope user hamllm >/dev/null 2>&1 || true
-    run claude mcp add --scope user "${env_args[@]}" hamllm -- "$BIN" mcp && registered=1
+    # `--env` is variadic in Claude's CLI: it swallows following bare words as KEY=VALUE pairs,
+    # so another option must come after it, before the server name.
+    if run claude mcp add "${env_args[@]}" --scope user hamllm -- "$BIN" mcp; then registered=1; else
+      failed+=("Claude Code")
+      say "WARN: registering with Claude Code failed. Run this by hand to see why:"
+      say "  claude mcp add ${env_args[*]} --scope user hamllm -- $BIN mcp"
+    fi
   fi
   if have codex && wants codex; then
     say "== Codex"
     [ "$DRY" = 1 ] || codex mcp remove hamllm >/dev/null 2>&1 || true
     if run codex mcp add "${env_args[@]}" hamllm -- "$BIN" mcp; then registered=1; else
+      failed+=("Codex")
       say "WARN: \`codex mcp add\` failed; add this to ~/.codex/config.toml instead:"
       printf '[mcp_servers.hamllm]\ncommand = "%s"\nargs = ["mcp"]\n[mcp_servers.hamllm.env]\nHAMLLM_MODEL = "%s"\n' "$BIN" "$MCP_MODEL"
     fi
@@ -169,6 +177,11 @@ if [ "$DO_INSTRUCTIONS" = 1 ]; then
     say "== offload rule -> $f"
     [ "$DRY" = 1 ] || edit_block "$f" add
   done
+fi
+
+if [ "${#failed[@]}" -gt 0 ]; then
+  echo "ERROR: could not register with: ${failed[*]} (everything else was installed)." >&2
+  exit 1
 fi
 
 say ""

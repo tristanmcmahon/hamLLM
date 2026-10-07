@@ -25,6 +25,7 @@ Owner's stance: early work, free to re-architect, but `hamllm.agent` and `hamllm
 - Aliases never resolve to an unprofiled or failed model. A changed digest voids a profile.
 - argparse shares `parents=[common]` actions across subparsers: never use `set_defaults(timeout=...)` on one subcommand (it leaked mcp's 120s into every command). Timeouts resolve per command: 300s, MCP 120s.
 - MCP tool output lands in a cloud model's context, so keep it small: `local_models` is a ~400-token text summary (was ~4k tokens of JSON), and `ask_local` defaults to a terse worker system prompt (the first real call returned a menu of options for a one-line ask).
+- Claude Code's `claude mcp add --env` is variadic and swallows the server name as a KEY=VALUE: put another option (`--scope user`) after `--env`, before the name. Test stubs for external CLIs must mimic such parsing (a permissive stub hid this bug); the installer exits non-zero if any client registration fails.
 - Eval checks must judge behaviour, not wording. Most early failures were brittle checks (unicode spacing, summaries quoting an injected attack, asking before writing is valid). Normalise text, judge claims per sentence, ignore hedged ones. Check real transcripts before blaming a model.
 - Evals run at default temperature; 3 repeats is coarse, use 5+ before trusting a profile.
 
@@ -35,7 +36,7 @@ Owner's stance: early work, free to re-architect, but `hamllm.agent` and `hamllm
 Registration snippets are in the README (verified against Claude Code docs and Codex docs via search; Zed's `context_servers` flat form checked via search summaries only, so confirm it loads). Ways offload can happen: (1) the model chooses to call `ask_local`, helped by a `CLAUDE.md`/`AGENTS.md` rule such as "use `ask_local` first for summaries, commit messages, classification, log triage"; (2) deterministic hooks that bypass the cloud model (git `prepare-commit-msg` calling `hamllm run --model fast`, log summarisers); (3) a routing gateway in front of the clients, deliberately NOT recommended (judging "easy" silently degrades results; small models struggle with big agent prompts).
 
 ## Open items
-- Verified: the MCP server speaks the protocol correctly against the owner's real Ollama (2026-10-06). Still unverified: registration in real Claude Code, Codex and Zed, and whether they call `ask_local` unprompted
+- Verified: the MCP server speaks the protocol correctly against the owner's real Ollama (2026-10-06). Registration verified: real Claude Code CLI (`claude mcp get hamllm` -> Connected, tested in a throwaway HOME) and the owner's real Codex (`codex mcp add` succeeded). Still unverified: Zed loading it, and whether any client calls `ask_local` unprompted
 - Offered, not built: an offload usage log (time, model, latency, counts only, never prompts) to see whether clients really offload; the `CLAUDE.md`/`AGENTS.md` snippet; commit-message and log-summary hooks
 - Not built: streaming, `hamllm acp` (local agent in Zed's panel), CI lint step
 - Bump Gwen's and Helix's pinned copies and run Gwen's tests (unverified; fields were added with defaults)
