@@ -4,6 +4,7 @@
 #
 #   scripts/install.sh                       launcher + register MCP in whichever of claude/codex exist
 #   scripts/install.sh --profile-all         ...and profile every installed text model (slow)
+#   scripts/install.sh --zed                 ...and edit Zed's settings.json (comments preserved, backup made)
 #   scripts/install.sh --instructions        ...and add an offload rule to ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md
 #   scripts/install.sh --dry-run             show what would happen, change nothing
 #   scripts/install.sh --uninstall           remove the launcher, registrations and instruction blocks
@@ -13,7 +14,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PREFIX="${PREFIX:-$HOME/.local}"
 MCP_MODEL="${HAMLLM_MCP_MODEL:-code}"   # alias the MCP server uses as its default model
 REPEATS=5
-DRY=0 UNINSTALL=0 DO_MCP=1 DO_INSTRUCTIONS=0 PROFILE_ALL=0
+DRY=0 UNINSTALL=0 DO_MCP=1 DO_INSTRUCTIONS=0 PROFILE_ALL=0 DO_ZED=0
 PROFILE_MODELS=()
 ONLY=""
 failed=()
@@ -27,6 +28,7 @@ Options:
   --profile TAG       run `hamllm eval --save` for TAG (repeatable)
   --profile-all       run `hamllm eval --save --all`
   --repeats N         repeats per eval case (default 5)
+  --zed               add the server to Zed's settings.json (path: $ZED_SETTINGS or ~/.config/zed/settings.json)
   --instructions      add the offload rule block to the clients' global instruction files
   --dry-run, --uninstall, -h
 Env: HAMLLM_MCP_MODEL (default "code"), HAMLLM_HOST (passed to the MCP server if set)
@@ -41,6 +43,7 @@ while [ $# -gt 0 ]; do
     --profile) PROFILE_MODELS+=("$2"); shift ;;
     --profile-all) PROFILE_ALL=1 ;;
     --repeats) REPEATS="$2"; shift ;;
+    --zed) DO_ZED=1 ;;
     --instructions) DO_INSTRUCTIONS=1 ;;
     --dry-run) DRY=1 ;;
     --uninstall) UNINSTALL=1 ;;
@@ -103,6 +106,10 @@ if [ "$UNINSTALL" = 1 ]; then
   for f in "${INSTRUCTION_FILES[@]}"; do
     [ -f "$f" ] && grep -qF "$BEGIN_MARK" "$f" && { say "+ remove hamllm block from $f"; [ "$DRY" = 1 ] || edit_block "$f" remove; }
   done
+  if [ "$DO_ZED" = 1 ]; then
+    zed_args=(--remove); [ "$DRY" = 0 ] || zed_args+=(--dry-run)
+    say "== Zed"; "$PY" "$REPO/scripts/zed_config.py" "${zed_args[@]}" || true
+  fi
   run rm -f "$BIN"
   say "Uninstalled. Profiles remain in \${HAMLLM_STATE_DIR:-~/.local/state/hamllm} (delete by hand if unwanted)."
   exit 0
@@ -161,14 +168,25 @@ if [ "$DO_MCP" = 1 ]; then
     fi
   fi
   [ "$registered" = 1 ] || say "No claude/codex CLI registered (none found, or all failed)."
-  say "== Zed (not edited automatically: settings.json is JSONC). Add under \"context_servers\":"
-  printf '  "hamllm": { "command": "%s", "args": ["mcp"], "env": { "HAMLLM_MODEL": "%s" } }\n' "$BIN" "$MCP_MODEL"
+  if [ "$DO_ZED" = 0 ]; then
+    say "== Zed (not edited; re-run with --zed to have it edited for you). Add under \"context_servers\":"
+    printf '  "hamllm": { "command": "%s", "args": ["mcp"], "env": { "HAMLLM_MODEL": "%s" } }\n' "$BIN" "$MCP_MODEL"
+  fi
 
   if [ "$DRY" = 0 ]; then
     out="$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' \
                           '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | "$BIN" mcp)"
     case "$out" in *ask_local*) say "OK: MCP server answers and offers ask_local." ;; *) echo "ERROR: MCP smoke test failed: $out" >&2; exit 1 ;; esac
   fi
+fi
+
+# 4b. Zed: edit settings.json in place (JSONC-aware; backs up first; refuses files it cannot parse)
+if [ "$DO_ZED" = 1 ]; then
+  say "== Zed"
+  zed_args=(--command "$BIN" --model "$MCP_MODEL")
+  [ -z "${HAMLLM_HOST:-}" ] || zed_args+=(--host "$HAMLLM_HOST")
+  [ "$DRY" = 0 ] || zed_args+=(--dry-run)
+  "$PY" "$REPO/scripts/zed_config.py" "${zed_args[@]}" || failed+=("Zed")
 fi
 
 # 5. offload rule for the clients (opt-in; edits global instruction files)

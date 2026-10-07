@@ -156,3 +156,38 @@ def test_a_failed_registration_is_reported_and_fails_the_install_but_not_the_oth
 
 def test_env_flag_is_not_followed_by_the_bare_server_name(env):
     install(env, "--claude")  # the stub rejects `--env K=V hamllm` like real Claude Code
+
+
+def test_zed_flag_edits_settings_in_place_and_uninstall_removes_only_that(env, tmp_path):
+    settings = tmp_path / "zed-settings.json"
+    settings.write_text('// mine\n{\n  "theme": "One Dark", // keep\n}\n')
+    zenv = {**env, "ZED_SETTINGS": str(settings)}
+    out = install(zenv, "--no-mcp", "--zed").stdout
+    text = settings.read_text()
+    assert '"hamllm"' in text and "// mine" in text and "// keep" in text
+    assert str(Path(env["PREFIX"], "bin", "hamllm")) in text
+    assert list(tmp_path.glob("zed-settings.json.bak-*")) and "== Zed" in out
+    install(zenv, "--uninstall", "--zed")
+    assert '"hamllm"' not in settings.read_text() and "// keep" in settings.read_text()
+
+
+def test_zed_dry_run_shows_a_diff_and_writes_nothing(env, tmp_path):
+    settings = tmp_path / "zed-settings.json"
+    settings.write_text("{}\n")
+    out = install({**env, "ZED_SETTINGS": str(settings)}, "--no-mcp", "--zed", "--dry-run").stdout
+    assert '"hamllm"' in out and settings.read_text() == "{}\n"
+
+
+def test_zed_failure_is_reported_and_fails_the_install(env, tmp_path):
+    settings = tmp_path / "zed-settings.json"
+    settings.write_text('{"theme": ')
+    result = install({**env, "ZED_SETTINGS": str(settings)}, "--no-mcp", "--zed", check=False)
+    assert result.returncode == 1 and "Zed" in result.stderr
+    assert settings.read_text() == '{"theme": '  # untouched
+
+
+def test_without_the_zed_flag_zed_is_never_touched_and_the_snippet_is_printed(env, tmp_path):
+    settings = tmp_path / "zed-settings.json"
+    settings.write_text("{}\n")
+    out = install({**env, "ZED_SETTINGS": str(settings)}).stdout
+    assert settings.read_text() == "{}\n" and "--zed" in out
