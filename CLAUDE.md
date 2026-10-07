@@ -11,7 +11,8 @@ Owner's stance: early work, free to re-architect, but `hamllm.agent` and `hamllm
 - `src/hamllm/evals.py`: 18 cases in 6 categories (basic, instruction, tools, safety, coding, context) run against an in-memory `Sandbox`; deterministic checks, never exec model code
 - `src/hamllm/profiles.py`: per-model eval profiles (digest-bound, with trial counts), aliases `fast`/`tools`/`code`, evidence-weighted ranking (Wilson lower bound, speed breaks ties)
 - `src/hamllm/mcp.py`: stdio MCP server, read-only tools `ask_local` and `local_models`
-- `scripts/install.sh` (tested by `tests/test_install.py` with stub claude/codex in a temp HOME): launcher at `~/.local/bin/hamllm` that runs this checkout (no pip, for NixOS), MCP registration with `HAMLLM_MODEL=code`, opt-in `--profile`/`--profile-all`/`--instructions`, `--dry-run`, `--uninstall`. Zed is printed, never edited (JSONC)
+- `scripts/install.sh` (tested by `tests/test_install.py` with stub claude/codex in a temp HOME): launcher at `~/.local/bin/hamllm` that runs this checkout (no pip, for NixOS), MCP registration with `HAMLLM_MODEL=code`, opt-in `--profile`/`--profile-all`/`--instructions`, `--dry-run`, `--uninstall`. `--zed` runs `scripts/zed_config.py`; otherwise Zed's snippet is only printed
+- `scripts/zed_config.py` (tested by `tests/test_zed_config.py`): edits Zed's JSONC settings.json in place (span-tracking parser, comments/formatting kept, timestamped backup, `--dry-run`, `--remove`, `--legacy`, verifies its own output before writing). Fuzzing it found a real bug (insertion after a same-line closing brace), so keep the seeded fuzz test
 - `src/hamllm/config.py`: env settings (`HAMLLM_HOST/MODEL/NUM_CTX/KEEP_ALIVE/TIMEOUT/MCP_TIMEOUT/STATE_DIR`)
 - `src/hamllm/cli.py`: `run`, `models`, `doctor`, `eval` (`--save`, `--all`, `--repeats`), `resolve`, `mcp`
 - Profiles live in `~/.local/state/hamllm/profiles.json`
@@ -26,6 +27,7 @@ Owner's stance: early work, free to re-architect, but `hamllm.agent` and `hamllm
 - argparse shares `parents=[common]` actions across subparsers: never use `set_defaults(timeout=...)` on one subcommand (it leaked mcp's 120s into every command). Timeouts resolve per command: 300s, MCP 120s.
 - MCP tool output lands in a cloud model's context, so keep it small: `local_models` is a ~400-token text summary (was ~4k tokens of JSON), and `ask_local` defaults to a terse worker system prompt (the first real call returned a menu of options for a one-line ask).
 - Claude Code's `claude mcp add --env` is variadic and swallows the server name as a KEY=VALUE: put another option (`--scope user`) after `--env`, before the name. Test stubs for external CLIs must mimic such parsing (a permissive stub hid this bug); the installer exits non-zero if any client registration fails.
+- Never round-trip user config through `json` when it is JSONC (Zed): edit text spans and verify the result still parses. Test config editors with randomised layouts, not just hand-written cases.
 - Eval checks must judge behaviour, not wording. Most early failures were brittle checks (unicode spacing, summaries quoting an injected attack, asking before writing is valid). Normalise text, judge claims per sentence, ignore hedged ones. Check real transcripts before blaming a model.
 - Evals run at default temperature; 3 repeats is coarse, use 5+ before trusting a profile.
 
