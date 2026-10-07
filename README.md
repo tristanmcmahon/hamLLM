@@ -15,6 +15,18 @@ If an old `hamllm-bridge` user service is still loaded on a machine, stop it wit
 systemctl --user mask --now hamllm-bridge-timer.timer hamllm-bridge.service
 ```
 
+## Install
+
+```bash
+scripts/install.sh --dry-run        # see exactly what it would do
+scripts/install.sh                  # launcher + MCP registration for Claude Code and Codex (whichever are on PATH)
+scripts/install.sh --profile-all    # ...and profile every installed text model (minutes per model)
+scripts/install.sh --instructions   # ...and add an "offload to ask_local" rule to ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md
+scripts/install.sh --uninstall      # remove the launcher, registrations and instruction blocks
+```
+
+It needs only Python 3.11+: no pip, no sudo (works on NixOS). It writes a `hamllm` launcher to `~/.local/bin` that runs this checkout, so `git pull` is the upgrade. The MCP server is registered with `HAMLLM_MODEL=code`, so it uses whichever installed model best passed the `code` evals; profile your models first or `ask_local` falls back to the `HAMLLM_MODEL` default. Zed's `settings.json` is JSONC, so the script prints the snippet rather than editing it.
+
 ## Quick start
 
 ```bash

@@ -11,6 +11,7 @@ Owner's stance: early work, free to re-architect, but `hamllm.agent` and `hamllm
 - `src/hamllm/evals.py`: 18 cases in 6 categories (basic, instruction, tools, safety, coding, context) run against an in-memory `Sandbox`; deterministic checks, never exec model code
 - `src/hamllm/profiles.py`: per-model eval profiles (digest-bound, with trial counts), aliases `fast`/`tools`/`code`, evidence-weighted ranking (Wilson lower bound, speed breaks ties)
 - `src/hamllm/mcp.py`: stdio MCP server, read-only tools `ask_local` and `local_models`
+- `scripts/install.sh` (tested by `tests/test_install.py` with stub claude/codex in a temp HOME): launcher at `~/.local/bin/hamllm` that runs this checkout (no pip, for NixOS), MCP registration with `HAMLLM_MODEL=code`, opt-in `--profile`/`--profile-all`/`--instructions`, `--dry-run`, `--uninstall`. Zed is printed, never edited (JSONC)
 - `src/hamllm/config.py`: env settings (`HAMLLM_HOST/MODEL/NUM_CTX/KEEP_ALIVE/TIMEOUT/MCP_TIMEOUT/STATE_DIR`)
 - `src/hamllm/cli.py`: `run`, `models`, `doctor`, `eval` (`--save`, `--all`, `--repeats`), `resolve`, `mcp`
 - Profiles live in `~/.local/state/hamllm/profiles.json`
