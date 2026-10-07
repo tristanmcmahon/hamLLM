@@ -6,7 +6,7 @@ The goal is fewer duplicated runtimes without turning unrelated applications int
 
 | Repository | Decision | Durable responsibility |
 | --- | --- | --- |
-| `hamLLM` | **Anchor / expand** | Local Ollama CLI, shared transport, bounded agent-runtime primitives |
+| `hamLLM` | **Anchor / expand** | Capability evals and profiles for local models, alias resolution, MCP front door, shared transport, bounded agent-runtime primitives |
 | `hamGwen` | **Thin compatibility/persona layer** | Gwen tools, approval previews, prompts, policy and behavioural evals over `hamLLM` |
 | `hamBridge` | **Retire** | Tombstone only; the old mail bridge is not retained |
 | `HamSidian` | **Keep separate** | Read-only-source Obsidian analysis, local semantic review, derived-vault publication and safety contract |
@@ -28,7 +28,11 @@ The goal is fewer duplicated runtimes without turning unrelated applications int
 
 ### Local-only transport and CLI
 
-`hamLLM` owns dependency-free Ollama transport plus `run`, `chat`, `models`, and `doctor`. The historical Gmail/OAuth/mail-poller implementation is removed rather than preserved as a second integration path.
+`hamLLM` owns dependency-free Ollama transport plus `run`, `models`, `doctor`, `eval`, `resolve` and `mcp`. The interactive `chat` command was removed in 0.2.0 as a duplicate of `ollama run`. The historical Gmail/OAuth/mail-poller implementation is removed rather than preserved as a second integration path.
+
+### Capability layer (0.2.0)
+
+`hamllm eval --save` records per-category pass rates per model; aliases (`fast`, `tools`, `code`) resolve only to installed models that passed; `hamllm mcp` exposes read-only `ask_local` and `local_models` to Zed, Claude Code and Codex with a fixed context window, output cap and keep-alive. `hamllm.agent` and `hamllm.ollama` keep their import paths for Gwen's pinned submodule.
 
 ### Bounded agent core
 

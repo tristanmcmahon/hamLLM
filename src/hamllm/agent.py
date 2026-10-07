@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from .ollama import OllamaClient
+from .ollama import OllamaClient, OllamaError
 
 ToolApprover = Callable[[str, dict[str, Any]], bool]
 ToolObserver = Callable[[str, dict[str, Any]], None]
@@ -48,15 +48,44 @@ class AgentRuntime:
     max_response_rewrite_attempts: int = 1
     safe_policy_fallback: str = SAFE_POLICY_FALLBACK
     tool_observer: ToolObserver | None = None
+    options: dict[str, Any] | None = None
+    # Ollama answers HTTP 500 "error parsing tool call" when a model emits malformed
+    # tool-call JSON. Resampling usually fixes it, so retry rather than lose the turn.
+    tool_parse_retries: int = 1
+    retries_used: int = field(default=0, init=False)
 
     def _chat(self, messages: list[dict[str, Any]], *, allow_tools: bool = True) -> dict[str, Any]:
         schemas = self.tools.schemas if allow_tools and self.tools.schemas else None
-        return self.client.chat(
-            self.model,
-            messages,
-            tools=schemas,
-            think=self.reasoning,
-        )
+        # Only forwarded when set, so clients that predate `options` keep working.
+        extra = {"options": self.options} if self.options else {}
+        for attempt in range(self.tool_parse_retries + 1):
+            try:
+                return self.client.chat(
+                    self.model,
+                    messages,
+                    tools=schemas,
+                    think=self.reasoning,
+                    **extra,
+                )
+            except OllamaError as exc:
+                if attempt >= self.tool_parse_retries or "error parsing tool call" not in str(exc):
+                    raise
+                self.retries_used += 1
+        raise AssertionError("unreachable")
+
+    @staticmethod
+    def _safe_approver(approver: ToolApprover | None) -> ToolApprover:
+        """Default-deny: no approver, or one that raises, means "not approved"."""
+        if approver is None:
+            return lambda _name, _arguments: False
+
+        def approve(name: str, arguments: dict[str, Any]) -> bool:
+            try:
+                return bool(approver(name, arguments))
+            except Exception:
+                return False
+
+        return approve
 
     @staticmethod
     def _assistant_message(response: dict[str, Any]) -> dict[str, Any]:
@@ -123,7 +152,7 @@ class AgentRuntime:
         seen_observations: set[str] = set()
         seen_mutations: set[str] = set()
         seen_executions: set[str] = set()
-        approve = approver or (lambda _name, _arguments: False)
+        approve = self._safe_approver(approver)
 
         for _ in range(self.max_tool_rounds):
             assistant_message = self._assistant_message(self._chat(messages))

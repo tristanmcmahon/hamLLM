@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from hamllm.agent import AgentRuntime, ToolRegistry
 
 
@@ -115,3 +117,69 @@ def test_blocked_final_answer_is_rewritten_without_tools():
     assert runtime.run_turn(messages) == "safe text"
     assert client.calls[-1]["tools"] is None
     assert messages[-1]["content"] == "safe text"
+
+
+def test_options_reach_the_client_only_when_configured():
+    class Recording:
+        def __init__(self):
+            self.kwargs = []
+
+        def chat(self, model, messages, **kwargs):
+            self.kwargs.append(kwargs)
+            return answer("ok")
+
+    plain, tuned = Recording(), Recording()
+    AgentRuntime(client=plain, model="m").run_turn([{"role": "user", "content": "x"}])
+    AgentRuntime(client=tuned, model="m", options={"num_ctx": 8192}).run_turn([{"role": "user", "content": "x"}])
+    assert "options" not in plain.kwargs[0]
+    assert tuned.kwargs[0]["options"] == {"num_ctx": 8192}
+
+
+def test_approver_that_raises_is_a_denial_not_a_crash():
+    client = FakeClient([tool_call("write", {"path": "a"}), answer("not done")])
+    calls = []
+
+    def caller(name, arguments, *, allow_mutation=False):
+        calls.append(name)
+        return json.dumps({"ok": True})
+
+    def broken_approver(_name, _arguments):
+        raise RuntimeError("prompt UI crashed")
+
+    runtime = AgentRuntime(client=client, model="m",
+                           tools=ToolRegistry(caller=caller, mutating_tools=frozenset({"write"})))
+    messages = [{"role": "user", "content": "write"}]
+    assert runtime.run_turn(messages, approver=broken_approver) == "not done"
+    assert calls == []
+    assert "not approved" in messages[-2]["content"]
+
+
+def test_malformed_tool_call_500_is_retried_once_then_surfaced():
+    from hamllm.ollama import OllamaError
+
+    bad = OllamaError('Ollama returned HTTP 500: {"error":"error parsing tool call: raw=\'{}\', err=invalid character"}')
+
+    class Flaky:
+        def __init__(self, failures, error=bad):
+            self.failures, self.error, self.calls = failures, error, 0
+
+        def chat(self, model, messages, **kwargs):
+            self.calls += 1
+            if self.calls <= self.failures:
+                raise self.error
+            return answer("ok")
+
+    flaky = Flaky(1)
+    runtime = AgentRuntime(client=flaky, model="m")
+    assert runtime.run_turn([{"role": "user", "content": "x"}]) == "ok"
+    assert runtime.retries_used == 1 and flaky.calls == 2
+
+    stubborn = Flaky(5)
+    with pytest.raises(OllamaError):
+        AgentRuntime(client=stubborn, model="m").run_turn([{"role": "user", "content": "x"}])
+    assert stubborn.calls == 2  # one try + one retry, not an unbounded loop
+
+    other = Flaky(1, OllamaError("Ollama returned HTTP 500: out of memory"))
+    with pytest.raises(OllamaError):
+        AgentRuntime(client=other, model="m").run_turn([{"role": "user", "content": "x"}])
+    assert other.calls == 1  # unrelated failures are never retried

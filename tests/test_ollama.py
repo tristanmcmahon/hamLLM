@@ -37,6 +37,24 @@ class OllamaClientTests(unittest.TestCase):
         )
 
     @patch("urllib.request.urlopen")
+    def test_installed_maps_tags_to_digests_and_tolerates_missing_ones(self, urlopen):
+        urlopen.return_value = Response(
+            {"models": [{"name": "a:1", "digest": "sha-a"}, {"name": "b:2"}, {"digest": "orphan"}, "junk"]}
+        )
+        self.assertEqual(
+            OllamaClient("http://localhost:11434").installed(), {"a:1": "sha-a", "b:2": ""}
+        )
+
+    @patch("urllib.request.urlopen")
+    def test_capabilities_reads_show_endpoint_and_tolerates_absence(self, urlopen):
+        client = OllamaClient("http://localhost:11434")
+        urlopen.return_value = Response({"capabilities": ["completion", "tools", 7]})
+        self.assertEqual(client.capabilities("m"), ["completion", "tools"])
+        self.assertEqual(urlopen.call_args.args[0].full_url, "http://localhost:11434/api/show")
+        urlopen.return_value = Response({"details": {}})
+        self.assertEqual(client.capabilities("m"), [])
+
+    @patch("urllib.request.urlopen")
     def test_generate_sends_non_streaming_payload(self, urlopen):
         urlopen.return_value = Response({"response": "local answer"})
         client = OllamaClient("http://localhost:11434")
@@ -47,6 +65,24 @@ class OllamaClientTests(unittest.TestCase):
             json.loads(request.data),
             {"model": "gpt-oss:20b", "prompt": "hello", "stream": False},
         )
+
+    @patch("urllib.request.urlopen")
+    def test_options_and_keep_alive_are_sent_only_when_set(self, urlopen):
+        urlopen.return_value = Response({"response": "ok"})
+        OllamaClient("http://localhost:11434").generate(
+            "m", "hi", options={"num_ctx": 16384, "num_predict": 64}, keep_alive="30m"
+        )
+        payload = json.loads(urlopen.call_args.args[0].data)
+        self.assertEqual(payload["options"], {"num_ctx": 16384, "num_predict": 64})
+        self.assertEqual(payload["keep_alive"], "30m")
+
+    @patch("urllib.request.urlopen")
+    def test_chat_forwards_options(self, urlopen):
+        urlopen.return_value = Response({"message": {"role": "assistant", "content": "x"}})
+        OllamaClient("http://localhost:11434").chat("m", [], options={"num_ctx": 8192})
+        payload = json.loads(urlopen.call_args.args[0].data)
+        self.assertEqual(payload["options"], {"num_ctx": 8192})
+        self.assertNotIn("keep_alive", payload)
 
     @patch("urllib.request.urlopen")
     def test_chat_preserves_full_response_for_agent_runtime(self, urlopen):
