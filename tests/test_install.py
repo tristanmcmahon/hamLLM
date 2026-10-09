@@ -77,7 +77,7 @@ def test_install_writes_a_working_launcher_and_registers_both_clients(env):
     version = subprocess.run([str(launcher), "--version"], capture_output=True, text=True, env=env)
     assert version.stdout.startswith("hamLLM ")
     assert "OK: MCP server answers and offers ask_local" in out
-    assert "WARN: Ollama not healthy" in out  # unreachable Ollama is a warning, not a failure
+    assert "WARN: Ollama or the \"code\" model is not healthy" in out  # unreachable Ollama is a warning, not a failure
 
     log = calls(env)
     add_claude = next(c for c in log if c.startswith("claude mcp add"))
@@ -191,3 +191,34 @@ def test_without_the_zed_flag_zed_is_never_touched_and_the_snippet_is_printed(en
     settings.write_text("{}\n")
     out = install({**env, "ZED_SETTINGS": str(settings)}).stdout
     assert settings.read_text() == "{}\n" and "--zed" in out
+
+
+def test_doctor_checks_the_model_the_clients_will_use_not_the_shell_default(env, tmp_path):
+    import http.server
+    import json as _json
+    import threading
+
+    class Fake(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            body = {"version": "9.9"} if self.path == "/api/version" else {"models": [{"name": "gemma4:12b", "digest": "d1"}]}
+            data = _json.dumps(body).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(data)
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Fake)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    state = Path(env["HAMLLM_STATE_DIR"])
+    state.mkdir(parents=True)
+    cats = {c: 1.0 for c in ("basic", "instruction", "tools", "safety", "coding", "context")}
+    (state / "profiles.json").write_text(_json.dumps({"gemma4:12b": {
+        "ready": True, "digest": "d1", "categories": cats, "median_seconds": 3.0, "evaluated_at": "t"}}))
+    try:
+        out = install({**env, "HAMLLM_HOST": f"http://127.0.0.1:{server.server_port}"}, "--no-mcp").stdout
+    finally:
+        server.shutdown()
+    assert "code -> gemma4:12b" in out and "gpt-oss" not in out
