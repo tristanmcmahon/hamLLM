@@ -130,7 +130,8 @@ case ":$PATH:" in *":$PREFIX/bin:"*) ;; *) say "NOTE: $PREFIX/bin is not on your
 
 # 2. is Ollama reachable? (warn only: you can install before starting it)
 if [ "$DRY" = 0 ]; then
-  "$BIN" doctor || say "WARN: Ollama not healthy for the default model yet; install continues."
+  # check the model the registered clients will use (HAMLLM_MODEL=$MCP_MODEL), not the shell default
+  HAMLLM_MODEL="$MCP_MODEL" "$BIN" doctor || say "WARN: Ollama or the \"$MCP_MODEL\" model is not healthy yet; install continues."
 fi
 
 # 3. profile models (opt-in: minutes per model)
