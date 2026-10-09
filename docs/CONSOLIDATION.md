@@ -14,6 +14,13 @@ The goal is fewer duplicated runtimes without turning unrelated applications int
 | `hamCintosh` | **Keep separate** | Conservative Apple Silicon user-environment bootstrap |
 | `hamKeyDist` | **Keep separate** | Home-LAN SSH public-key distribution and removal |
 | `nixos-helix` | **Keep separate infrastructure** | Helix NixOS configuration, mounts, packages, services/timers and machine integration |
+| `hamCade` | **Keep separate** | Arcade/MAME application policy, curation, saves and state; `nixos-helix` owns host integration and only vendors its `dependencies.nix` |
+| `hamOlogy` | **Keep separate** | Operating toolkit for the NAS's Docker media and infrastructure stack |
+| `hamFence` | **Keep separate** | NAS networking, TLS, private ingress and DNS policy (container lifecycle stays with `hamOlogy`, SSH keys with `hamKeyDist`) |
+| `modern-bash` | **Keep separate** | Portable Bash environment; consumed by `hamCintosh` (submodule) and `nixos-helix` (snapshot) |
+| `tfpga`, `MrKeeper`, `tristerFAVs` | **Keep separate, document the link** | MiSTer tooling: SMB ROM bind mounts; cron-backed maintenance that calls the bind-mount script; a design-only favourites generator |
+| `hamWorld` | **Keep separate** | Single-script RimWorld mod bootstrapper; unrelated to the AI stack |
+| `nixos-config` | **Retire** | 2025 stock NixOS install config, superseded by `nixos-helix`; archive |
 
 ## Invariants
 
@@ -63,3 +70,7 @@ The running model list and GPU use must be checked on Helix after activation.
 Reusable tool implementations may move into `hamLLM` only where they can be parameterised without weakening Gwen's boundaries. Application-specific tools remain with Gwen.
 
 HamSidian is not a mandatory consumer: its OpenClaw reviewer and source-vault protections are a distinct security boundary and should remain separate unless a later migration produces a clear safety or maintenance benefit.
+
+## Where the plan lives
+
+The sequenced work for all of these repositories, with the evidence behind it, is in [`ROADMAP.md`](ROADMAP.md). This file stays the ownership map and the invariants; the roadmap changes more often.
