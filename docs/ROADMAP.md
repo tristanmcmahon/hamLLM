@@ -22,7 +22,7 @@ Good news first. The latest default-branch CI run passed in every repo I could q
 1. **Stranded work.** Two hamLLM commits (a Zed settings editor and an installer doctor fix, about 700 lines with tests) were pushed to a PR branch after the PR merged, so they never reached `master`. A plain "delete merged branches" sweep would have destroyed them. They are now on the `claude/repos-cleanup-dev-plan-43obhe` branch with their tests passing.
 2. **Pin drift.** `hamGwen`'s submodule and `nixos-helix`'s vendored copy both sit at hamLLM `4f2f931`, 19 commits behind `master`. Verified 2026-10-09: Gwen's 52 unit tests pass against both the pin and `master`. Its live evals were not run, and Helix's snapshot needs Nix to validate. The `modern-bash` and `hamCade` snapshots in `nixos-helix` and the `modern-bash` submodule in `hamCintosh` are current.
 3. **The compatibility rule had no test.** "`hamllm.agent` and `hamllm.ollama` import paths must keep working" was only a sentence. `tests/test_consumer_contract.py` now pins the exact keyword arguments Gwen passes and fails if one is removed, renamed or made required.
-4. **Branch sprawl.** 121 non-default remote branches across ten repos. 109 are safe to delete (ancestors of the default branch, content already present, or the exact tip of a merged PR; every such PR targeted the default branch). 6 need a decision, 6 are deliberate keeps (two named checkpoints, a backup, two branches behind open PRs, and this cleanup branch). The list with tip SHAs for restoring is kept privately because most of the repos are private.
+4. **Branch sprawl.** 121 non-default remote branches across ten repos. 108 are safe to delete (ancestors of the default branch, content already present, or the exact tip of a merged PR; every such PR targeted the default branch). One holds the stranded work from finding 1 and is deleted only once that work is on `master`. Six never had a merged PR (closed unmerged, merged then rolled back, or no PR at all) and are tagged `archive/<name>` before deletion so nothing is lost. Six are deliberate keeps (two named checkpoints, a backup, two branches behind open PRs, and this cleanup branch). A second review corrected the first count: one branch counted as merged had its PR merged and then rolled back, so it moved to the tagged group. The list with tip SHAs for restoring is kept privately because most of the repos are private.
 5. **Two PRs untouched since 2026-09-18** (`hamCintosh` backup pruning, `hamSidian` macOS workflow), both still open.
 6. **Convention drift.**
    - Default branch: `master` in four repos (hamFence, hamOlogy, hamCade, hamGwen), `main` elsewhere.
@@ -40,8 +40,8 @@ Each phase is small PRs that keep CI green. "Done when" is the check, not the in
 ### Phase 0: close the loops (owner decisions, minutes each)
 
 - Merge the hamLLM cleanup branch (rescued work, CI lint, contract test, these docs). Done when: CI green on `master`, then delete `claude/fervent-bardeen-iqmlz0`.
-- Delete the 109 merged branches and decide the 6 review ones. Then turn on "Automatically delete head branches" in every repo so this does not regrow. Done when: each repo lists only its default branch, named checkpoints and open-PR branches.
-- Merge or close `hamCintosh` #2 and `hamSidian` #46.
+- Delete the 108 merged branches, tag-then-delete the 6 unmerged ones, and delete the stranded-work branch once its content is on `master` (a script that checks each branch is still at the reviewed commit does this). Then turn on "Automatically delete head branches" in every repo so this does not regrow. Done when: each repo lists only its default branch, named checkpoints and open-PR branches.
+- Merge `hamCintosh` #2 and `hamSidian` #46 (decided 2026-10-10). Both were mergeable and up to date; hamSidian's CI is green and hamCintosh's regression test passes locally, though hamCintosh has no CI.
 - Archive `hamBridge` and `nixos-config` (repository settings; a README pointer already exists for the first).
 
 ### Phase 1: pins (this week)
@@ -79,9 +79,9 @@ No cross-cutting changes to `hamOlogy`, `hamFence`, `hamCade`, `hamSteam`, `HamS
 
 ## Decisions for the owner
 
-1. Delete the 109 merged branches? (Reversible from the recorded SHAs for a limited time.)
-2. What to do with the 6 review branches.
-3. Merge or close the two open PRs.
+1. ~~Delete the merged branches~~ (decided 2026-10-10: yes; reversible from the recorded SHAs and the `archive/` tags).
+2. ~~The unmerged branches~~ (decided: tag then delete).
+3. ~~The two open PRs~~ (decided: merge both).
 4. Archive `hamBridge` and `nixos-config`.
 5. `main` everywhere, and `AGENTS.md` plus a `CLAUDE.md` pointer?
 6. Licence for the public repos, or deliberately none.
