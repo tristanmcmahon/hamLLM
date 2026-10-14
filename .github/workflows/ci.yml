@@ -15,7 +15,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: python -m pip install -e . pytest
+      - run: python -m pip install -e . pytest ruff==0.16.8
+      - run: ruff check --select F,E9,B,SIM src tests scripts
       - run: python -m pytest -q
       - run: python -m compileall -q src tests
       - run: |

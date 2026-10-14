@@ -21,11 +21,12 @@ systemctl --user mask --now hamllm-bridge-timer.timer hamllm-bridge.service
 scripts/install.sh --dry-run        # see exactly what it would do
 scripts/install.sh                  # launcher + MCP registration for Claude Code and Codex (whichever are on PATH)
 scripts/install.sh --profile-all    # ...and profile every installed text model (minutes per model)
+scripts/install.sh --zed            # ...and add the server to Zed's settings.json (comments preserved, backup made)
 scripts/install.sh --instructions   # ...and add an "offload to ask_local" rule to ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md
 scripts/install.sh --uninstall      # remove the launcher, registrations and instruction blocks
 ```
 
-It needs only Python 3.11+: no pip, no sudo (works on NixOS). It writes a `hamllm` launcher to `~/.local/bin` that runs this checkout, so `git pull` is the upgrade. The MCP server is registered with `HAMLLM_MODEL=code`, so it uses whichever installed model best passed the `code` evals; profile your models first or `ask_local` falls back to the `HAMLLM_MODEL` default. Zed's `settings.json` is JSONC, so the script prints the snippet rather than editing it.
+It needs only Python 3.11+: no pip, no sudo (works on NixOS). It writes a `hamllm` launcher to `~/.local/bin` that runs this checkout, so `git pull` is the upgrade. The MCP server is registered with `HAMLLM_MODEL=code`, so it uses whichever installed model best passed the `code` evals; profile your models first or `ask_local` falls back to the `HAMLLM_MODEL` default. Without `--zed` it prints the Zed snippet and leaves Zed alone. `--zed` runs `scripts/zed_config.py`, which edits Zed's JSONC `settings.json` in place: it keeps your comments and formatting, makes a timestamped backup first, shows the change with `--dry-run`, and refuses to write if it can't parse the file. Run it directly for finer control (`--legacy` for older Zed's nested form, `--remove` to take the entry out, `--settings PATH` or `$ZED_SETTINGS` for a non-default file).
 
 ## Quick start
 
@@ -60,7 +61,7 @@ The same cases run as pytest tests: `HAMLLM_LIVE=1 python -m pytest tests/test_l
 
 ## MCP server (`hamllm mcp`)
 
-Standard-library stdio server, read-only: `ask_local(prompt, system?, model?, max_tokens?)` and `local_models()`. Every call sets a deliberate context window (`num_ctx`), an output cap and `keep_alive`, so clients cannot thrash VRAM or hold the GPU. Failures come back as tool errors, so the calling model can fall back. Two guards bound what a calling client can make the GPU do: prompts that clearly overflow the context window are rejected rather than silently truncated, and only the default model or a profiled model can be loaded (an installed-but-unprofiled tag is refused).
+Standard-library stdio server, read-only: `ask_local(prompt, system?, model?, max_tokens?)` and `local_models()`. Every call sets a deliberate context window (`num_ctx`), an output cap and `keep_alive`, so clients cannot thrash VRAM or hold the GPU. Failures come back as tool errors, so the calling model can fall back. Two guards bound what a calling client can make the GPU do: prompts that, plus the requested output budget, would overflow the context window are rejected rather than silently truncated, and only the default model or a profiled model can be loaded (an installed-but-unprofiled tag is refused).
 
 Use an absolute path to `hamllm` (for example `./result/bin/hamllm` after `nix-build`) if it is not on the PATH of the client that launches it. To point at a non-default Ollama, add `HAMLLM_HOST`.
 
@@ -80,7 +81,8 @@ command = "hamllm"
 args = ["mcp"]
 ```
 ```jsonc
-// Zed: settings.json (or Settings -> AI -> MCP Servers -> Add Local Server)
+// Zed: scripts/zed_config.py (or install.sh --zed) adds this for you; by hand in settings.json
+// (or Settings -> AI -> MCP Servers -> Add Local Server)
 "context_servers": {
   "hamllm": { "command": "hamllm", "args": ["mcp"], "env": {} }
 }

@@ -157,10 +157,14 @@ class Server:
                 f"run `hamllm eval --save --model {model}` first"
             )
         estimated = (len(prompt) + len(system)) // CHARS_PER_TOKEN
-        if estimated > self.num_ctx:
+        # num_ctx is a shared window: the response budget must fit alongside the prompt, or
+        # Ollama truncates generation instead of the clean rejection this guard is meant to give.
+        if estimated + max_tokens > self.num_ctx:
             raise ValueError(
-                f"prompt is about {estimated} tokens but the local window is {self.num_ctx}; "
-                "Ollama would silently drop the start of it. Send less, or summarise it first."
+                f"prompt is about {estimated} tokens plus a {max_tokens}-token response budget, "
+                f"which does not fit the {self.num_ctx}-token local window; "
+                "Ollama would silently drop the start of it or truncate the response. "
+                "Send less, lower max_tokens, or summarise it first."
             )
         response = self.client.generate(
             model,

@@ -77,7 +77,7 @@ def test_install_writes_a_working_launcher_and_registers_both_clients(env):
     version = subprocess.run([str(launcher), "--version"], capture_output=True, text=True, env=env)
     assert version.stdout.startswith("hamLLM ")
     assert "OK: MCP server answers and offers ask_local" in out
-    assert "WARN: Ollama not healthy" in out  # unreachable Ollama is a warning, not a failure
+    assert "WARN: Ollama or the \"code\" model is not healthy" in out  # unreachable Ollama is a warning, not a failure
 
     log = calls(env)
     add_claude = next(c for c in log if c.startswith("claude mcp add"))
@@ -156,3 +156,69 @@ def test_a_failed_registration_is_reported_and_fails_the_install_but_not_the_oth
 
 def test_env_flag_is_not_followed_by_the_bare_server_name(env):
     install(env, "--claude")  # the stub rejects `--env K=V hamllm` like real Claude Code
+
+
+def test_zed_flag_edits_settings_in_place_and_uninstall_removes_only_that(env, tmp_path):
+    settings = tmp_path / "zed-settings.json"
+    settings.write_text('// mine\n{\n  "theme": "One Dark", // keep\n}\n')
+    zenv = {**env, "ZED_SETTINGS": str(settings)}
+    out = install(zenv, "--no-mcp", "--zed").stdout
+    text = settings.read_text()
+    assert '"hamllm"' in text and "// mine" in text and "// keep" in text
+    assert str(Path(env["PREFIX"], "bin", "hamllm")) in text
+    assert list(tmp_path.glob("zed-settings.json.bak-*")) and "== Zed" in out
+    install(zenv, "--uninstall", "--zed")
+    assert '"hamllm"' not in settings.read_text() and "// keep" in settings.read_text()
+
+
+def test_zed_dry_run_shows_a_diff_and_writes_nothing(env, tmp_path):
+    settings = tmp_path / "zed-settings.json"
+    settings.write_text("{}\n")
+    out = install({**env, "ZED_SETTINGS": str(settings)}, "--no-mcp", "--zed", "--dry-run").stdout
+    assert '"hamllm"' in out and settings.read_text() == "{}\n"
+
+
+def test_zed_failure_is_reported_and_fails_the_install(env, tmp_path):
+    settings = tmp_path / "zed-settings.json"
+    settings.write_text('{"theme": ')
+    result = install({**env, "ZED_SETTINGS": str(settings)}, "--no-mcp", "--zed", check=False)
+    assert result.returncode == 1 and "Zed" in result.stderr
+    assert settings.read_text() == '{"theme": '  # untouched
+
+
+def test_without_the_zed_flag_zed_is_never_touched_and_the_snippet_is_printed(env, tmp_path):
+    settings = tmp_path / "zed-settings.json"
+    settings.write_text("{}\n")
+    out = install({**env, "ZED_SETTINGS": str(settings)}).stdout
+    assert settings.read_text() == "{}\n" and "--zed" in out
+
+
+def test_doctor_checks_the_model_the_clients_will_use_not_the_shell_default(env, tmp_path):
+    import http.server
+    import json as _json
+    import threading
+
+    class Fake(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            body = {"version": "9.9"} if self.path == "/api/version" else {"models": [{"name": "gemma4:12b", "digest": "d1"}]}
+            data = _json.dumps(body).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(data)
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Fake)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    state = Path(env["HAMLLM_STATE_DIR"])
+    state.mkdir(parents=True)
+    cats = {c: 1.0 for c in ("basic", "instruction", "tools", "safety", "coding", "context")}
+    (state / "profiles.json").write_text(_json.dumps({"gemma4:12b": {
+        "ready": True, "digest": "d1", "categories": cats, "median_seconds": 3.0, "evaluated_at": "t"}}))
+    try:
+        out = install({**env, "HAMLLM_HOST": f"http://127.0.0.1:{server.server_port}"}, "--no-mcp").stdout
+    finally:
+        server.shutdown()
+    assert "code -> gemma4:12b" in out and "gpt-oss" not in out
