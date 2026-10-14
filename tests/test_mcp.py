@@ -161,9 +161,20 @@ def test_stale_profile_is_ignored_and_flagged_after_the_model_changes():
 def test_oversized_prompt_is_rejected_instead_of_silently_truncated():
     client = FakeClient()
     result = call(server(client), "ask_local", prompt="x" * (8192 * mcp.CHARS_PER_TOKEN + 4))
-    assert result["isError"] and "window is 8192" in result["content"][0]["text"]
+    assert result["isError"] and "8192-token local window" in result["content"][0]["text"]
     assert client.generated == []
     assert call(server(client), "ask_local", prompt="x" * 1000)["isError"] is False
+
+
+def test_response_budget_that_would_overflow_the_window_is_rejected():
+    # The prompt alone fits comfortably, but num_ctx is shared with the response budget:
+    # a near-ceiling max_tokens should not be allowed to push the turn past num_ctx.
+    client = FakeClient()
+    prompt = "x" * (7500 * mcp.CHARS_PER_TOKEN)
+    result = call(server(client), "ask_local", prompt=prompt, max_tokens=mcp.MAX_TOKENS_CEILING)
+    assert result["isError"] and "response budget" in result["content"][0]["text"]
+    assert client.generated == []
+    assert call(server(client), "ask_local", prompt=prompt, max_tokens=64)["isError"] is False
 
 
 def test_unprofiled_models_are_not_loadable_over_mcp_except_the_default():

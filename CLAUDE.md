@@ -23,6 +23,7 @@ Owner's stance: early work, free to re-architect, but `hamllm.agent` and `hamllm
 ## Decisions and why
 - Default context is 16k (`HAMLLM_NUM_CTX`) because Ollama's own 4k window silently truncates.
 - MCP server refuses prompts that overflow the window and models that were never profiled (except the default), so a cloud agent cannot make the GPU load an arbitrary model. It is read-only. Offloading is NOT privacy: the prompt comes from the calling client and the answer returns to it.
+- `num_ctx` is a shared window: the overflow check must count the prompt+system tokens *and* the requested `max_tokens`, not just the input. A near-ceiling prompt plus a large `max_tokens` used to pass the guard and let Ollama truncate the response instead of getting a clean rejection.
 - Aliases never resolve to an unprofiled or failed model. A changed digest voids a profile.
 - argparse shares `parents=[common]` actions across subparsers: never use `set_defaults(timeout=...)` on one subcommand (it leaked mcp's 120s into every command). Timeouts resolve per command: 300s, MCP 120s.
 - MCP tool output lands in a cloud model's context, so keep it small: `local_models` is a ~400-token text summary (was ~4k tokens of JSON), and `ask_local` defaults to a terse worker system prompt (the first real call returned a menu of options for a one-line ask).
@@ -39,7 +40,8 @@ Registration snippets are in the README (verified against Claude Code docs and C
 
 ## Open items
 - Verified: the MCP server speaks the protocol correctly against the owner's real Ollama (2026-10-06). Registration verified: real Claude Code CLI (`claude mcp get hamllm` -> Connected, tested in a throwaway HOME) and the owner's real Codex (`codex mcp add` succeeded). End to end verified by the owner in real Claude Code (2026-10-07): an explicit "use ask_local to write a one-line commit message" called the tool, gemma4:12b answered with one line (the terse default system prompt works), 18s for the whole turn. Still unverified: Zed loading it, and whether any client calls `ask_local` UNPROMPTED (the test above named the tool)
-- Offered, not built: an offload usage log (time, model, latency, counts only, never prompts) to see whether clients really offload; the `CLAUDE.md`/`AGENTS.md` snippet; commit-message and log-summary hooks
-- Not built: streaming, `hamllm acp` (local agent in Zed's panel), CI lint step
+- Built: the `CLAUDE.md`/`AGENTS.md` offload snippet (`scripts/install.sh --instructions`, idempotent marked block) and the CI lint step (`ruff check` runs in `ci.yml`).
+- Offered, not built: an offload usage log (time, model, latency, counts only, never prompts) to see whether clients really offload; commit-message and log-summary hooks
+- Not built: streaming, `hamllm acp` (local agent in Zed's panel)
 - Bump Gwen's and Helix's pinned copies and run Gwen's tests (unverified; fields were added with defaults)
 - Harder evals only if several models still score 100% and need ranking
