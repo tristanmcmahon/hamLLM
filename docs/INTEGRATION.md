@@ -1,6 +1,6 @@
 # Integrating local models with Claude, Codex and Zed
 
-Status: capability evals, profiles/aliases and the stdio MCP server (option B) are implemented. Options C and D below are still design only.
+Status: capability evals, profiles/aliases, the stdio MCP server (option B) and installer registration for Zed, Claude Code and Codex are implemented. Options C and D below are still design only.
 MCP registration for Claude Code, Codex and Zed was checked against current docs on 2026-10-06 (see the README). ACP details below are from memory and move quickly: check them before building.
 
 ## Step zero: find out what the local model can do
@@ -38,6 +38,8 @@ Zed has a built-in Ollama provider (`language_models.ollama.api_url`, pointed at
 
 ### B. `hamllm mcp`: one stdio MCP server, three clients (implemented)
 Zed (`context_servers`), Claude Code (`claude mcp add`) and Codex (`mcp_servers` in its config) all speak MCP, so one dependency-free stdio server serves them all.
+
+`scripts/install.sh` adds or updates only Zed's `context_servers.hamllm` entry in user JSONC settings, keeping other servers (including a separately configured OpenClaw Gateway MCP server), comments and other settings. It backs up settings before each write and reverses only its own entry on `--uninstall`. The local command is PATH-resolved `hamllm mcp`; `HAMLLM_MCP_MODEL` chooses the registered alias and `HAMLLM_HOST` passes through if supplied. Zed loading the entry on a real installation remains to be checked.
 
 Proposed tools, read-only by default:
 
@@ -98,5 +100,5 @@ Evals deliberately leave temperature at the model default, so `--repeats` measur
 ## Suggested order
 
 1. Run `hamllm eval --save --repeats 3` on each model Helix serves.
-2. Register `hamllm mcp` in Zed, Claude Code and Codex (snippets in the README).
+2. Run `scripts/install.sh` to register `hamllm mcp` in the available Zed, Claude Code and Codex clients; verify Zed's connection after restart.
 3. Revisit C (`hamllm acp`) once there is real usage, and add streaming then.

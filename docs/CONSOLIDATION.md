@@ -55,8 +55,13 @@ tools, approval previews, destructive-command response policy, prompts and evals
 
 `nixos-helix` packages a provenance-labelled hamLLM source snapshot for its
 development profile. It does not own hamLLM behaviour. The editor clients use
-Helix's loopback Ollama service directly; hamLLM does not proxy their traffic.
+Helix's loopback Ollama service directly when configured as an Ollama provider;
+MCP offloading goes through hamLLM's own read-only front door.
 The running model list and GPU use must be checked on Helix after activation.
+
+An OpenClaw Gateway MCP server remains a separate integration and can coexist
+with `context_servers.hamllm` in Zed. hamLLM does not implement OpenClaw's
+conversation or channel protocol; Helix owns only host-specific runtime adapters.
 
 ## Next possible slice
 
