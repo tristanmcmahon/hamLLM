@@ -19,13 +19,16 @@ systemctl --user mask --now hamllm-bridge-timer.timer hamllm-bridge.service
 
 ```bash
 scripts/install.sh --dry-run        # see exactly what it would do
-scripts/install.sh                  # launcher + MCP registration for Claude Code and Codex (whichever are on PATH)
+scripts/install.sh                  # launcher + MCP registration for installed Zed, Claude Code and Codex
+scripts/install.sh --zed            # only register Zed (also works before Zed is installed)
 scripts/install.sh --profile-all    # ...and profile every installed text model (minutes per model)
 scripts/install.sh --instructions   # ...and add an "offload to ask_local" rule to ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md
 scripts/install.sh --uninstall      # remove the launcher, registrations and instruction blocks
 ```
 
-It needs only Python 3.11+: no pip, no sudo (works on NixOS). It writes a `hamllm` launcher to `~/.local/bin` that runs this checkout, so `git pull` is the upgrade. The MCP server is registered with `HAMLLM_MODEL=code`, so it uses whichever installed model best passed the `code` evals; profile your models first or `ask_local` falls back to the `HAMLLM_MODEL` default. Zed's `settings.json` is JSONC, so the script prints the snippet rather than editing it.
+It needs only Python 3.11+: no pip, no sudo (works on NixOS). It writes a `hamllm` launcher to `~/.local/bin` that runs this checkout, so `git pull` is the upgrade. The MCP server is registered with `HAMLLM_MODEL=code` (override with `HAMLLM_MCP_MODEL`), so it uses whichever installed model best passed the `code` evals; profile your models first or `ask_local` falls back to the `HAMLLM_MODEL` default. `HAMLLM_HOST` is passed through when set.
+
+When Zed is on PATH or its settings already exist, install updates only `context_servers.hamllm` in `${XDG_CONFIG_HOME:-~/.config}/zed/settings.json`. It preserves JSONC comments, trailing commas, other settings and other MCP servers, and makes a timestamped `settings.json.hamllm-backup-*` before each change. `--uninstall` removes only the hamLLM entry; `--zed` targets Zed explicitly. The Zed command is `hamllm` so the launcher remains valid after Nix store garbage collection. Make sure `~/.local/bin` (or your `--prefix`/`PREFIX` bin directory) is on Zed's PATH; restart Zed after installation.
 
 ## Quick start
 
@@ -62,7 +65,7 @@ The same cases run as pytest tests: `HAMLLM_LIVE=1 python -m pytest tests/test_l
 
 Standard-library stdio server, read-only: `ask_local(prompt, system?, model?, max_tokens?)` and `local_models()`. Every call sets a deliberate context window (`num_ctx`), an output cap and `keep_alive`, so clients cannot thrash VRAM or hold the GPU. Failures come back as tool errors, so the calling model can fall back. Two guards bound what a calling client can make the GPU do: prompts that clearly overflow the context window are rejected rather than silently truncated, and only the default model or a profiled model can be loaded (an installed-but-unprofiled tag is refused).
 
-Use an absolute path to `hamllm` (for example `./result/bin/hamllm` after `nix-build`) if it is not on the PATH of the client that launches it. To point at a non-default Ollama, add `HAMLLM_HOST`.
+The installer uses the stable checkout launcher path for Claude Code and Codex, and the PATH-resolved `hamllm` command for Zed. For manual registration, use a stable absolute launcher path if the client cannot find `hamllm` on PATH. To point at a non-default Ollama, add `HAMLLM_HOST`.
 
 ```bash
 # Claude Code: --scope user makes it available in every project
@@ -82,11 +85,11 @@ args = ["mcp"]
 ```jsonc
 // Zed: settings.json (or Settings -> AI -> MCP Servers -> Add Local Server)
 "context_servers": {
-  "hamllm": { "command": "hamllm", "args": ["mcp"], "env": {} }
+  "hamllm": { "command": "hamllm", "args": ["mcp"], "env": { "HAMLLM_MODEL": "code" } }
 }
 ```
 
-Claude Code, Codex and Zed docs were checked on 2026-10-06 (Zed's via search summaries, since its docs site was unreachable from the sandbox). If Zed does not load the server, older versions used a nested form: `"command": { "path": "hamllm", "args": ["mcp"] }`. Claude Code's per-tool timeout is far longer than the server's 120s cap, so slow models time out inside hamLLM first and return a clean tool error.
+The flat Zed `context_servers` form matches [Zed's MCP documentation](https://zed.dev/docs/ai/mcp). Check Settings → AI → MCP Servers for a green “Server is active” indicator after restarting Zed. Claude Code's per-tool timeout is far longer than the server's 120s cap, so slow models time out inside hamLLM first and return a clean tool error.
 
 Offloading is not privacy: the prompt comes from the calling client and the answer returns to it.
 

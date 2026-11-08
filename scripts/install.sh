@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Install hamLLM from this checkout: a `hamllm` launcher, MCP registration for Claude Code
-# and Codex, and (opt-in) model profiling and offload instructions. No pip, no sudo.
+# Install hamLLM from this checkout: a `hamllm` launcher, MCP registration for Zed,
+# Claude Code and Codex, and (opt-in) model profiling and offload instructions. No pip, no sudo.
 #
-#   scripts/install.sh                       launcher + register MCP in whichever of claude/codex exist
+#   scripts/install.sh                       launcher + register MCP in whichever clients are found
 #   scripts/install.sh --profile-all         ...and profile every installed text model (slow)
 #   scripts/install.sh --instructions        ...and add an offload rule to ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md
 #   scripts/install.sh --dry-run             show what would happen, change nothing
@@ -22,7 +22,7 @@ usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; cat <<'EOF'
 
 Options:
   --prefix DIR        install the launcher to DIR/bin (default ~/.local; env PREFIX)
-  --claude | --codex  register only with that client (default: every one found on PATH)
+  --claude | --codex | --zed  register only with that client (default: every one found)
   --no-mcp            skip MCP registration
   --profile TAG       run `hamllm eval --save` for TAG (repeatable)
   --profile-all       run `hamllm eval --save --all`
@@ -36,7 +36,7 @@ EOF
 while [ $# -gt 0 ]; do
   case "$1" in
     --prefix) PREFIX="$2"; shift ;;
-    --claude|--codex) ONLY="${1#--}" ;;
+    --claude|--codex|--zed) ONLY="${1#--}" ;;
     --no-mcp) DO_MCP=0 ;;
     --profile) PROFILE_MODELS+=("$2"); shift ;;
     --profile-all) PROFILE_ALL=1 ;;
@@ -51,6 +51,7 @@ while [ $# -gt 0 ]; do
 done
 
 BIN="$PREFIX/bin/hamllm"
+ZED_SETTINGS="${XDG_CONFIG_HOME:-$HOME/.config}/zed/settings.json"
 BEGIN_MARK="<!-- hamllm:begin -->"
 END_MARK="<!-- hamllm:end -->"
 INSTRUCTION_FILES=("$HOME/.claude/CLAUDE.md" "$HOME/.codex/AGENTS.md")
@@ -97,7 +98,17 @@ mcp_env_args() {
   [ -z "${HAMLLM_HOST:-}" ] || printf '%s\0' --env "HAMLLM_HOST=$HAMLLM_HOST"
 }
 
+zed_edit() {
+  local args=("$PY" "$REPO/src/hamllm/zed_settings.py" "$1" --path "$ZED_SETTINGS" --model "$MCP_MODEL")
+  [ -z "${HAMLLM_HOST:-}" ] || args+=(--host "$HAMLLM_HOST")
+  [ "$DRY" = 0 ] || args+=(--dry-run)
+  "${args[@]}"
+}
+
 if [ "$UNINSTALL" = 1 ]; then
+  if wants zed && { [ -e "$ZED_SETTINGS" ] || [ -L "$ZED_SETTINGS" ]; }; then
+    zed_edit uninstall
+  fi
   have claude && wants claude && { run claude mcp remove --scope user hamllm || true; }
   have codex && wants codex && { run codex mcp remove hamllm || true; }
   for f in "${INSTRUCTION_FILES[@]}"; do
@@ -160,9 +171,14 @@ if [ "$DO_MCP" = 1 ]; then
       printf '[mcp_servers.hamllm]\ncommand = "%s"\nargs = ["mcp"]\n[mcp_servers.hamllm.env]\nHAMLLM_MODEL = "%s"\n' "$BIN" "$MCP_MODEL"
     fi
   fi
-  [ "$registered" = 1 ] || say "No claude/codex CLI registered (none found, or all failed)."
-  say "== Zed (not edited automatically: settings.json is JSONC). Add under \"context_servers\":"
-  printf '  "hamllm": { "command": "%s", "args": ["mcp"], "env": { "HAMLLM_MODEL": "%s" } }\n' "$BIN" "$MCP_MODEL"
+  if wants zed && { [ "$ONLY" = zed ] || have zed || [ -e "$ZED_SETTINGS" ] || [ -L "$ZED_SETTINGS" ]; }; then
+    say "== Zed"
+    if zed_edit install; then registered=1; else
+      failed+=("Zed")
+      say "WARN: could not safely update Zed settings at $ZED_SETTINGS."
+    fi
+  fi
+  [ "$registered" = 1 ] || say "No client registered (none found, or all failed)."
 
   if [ "$DRY" = 0 ]; then
     out="$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' \
