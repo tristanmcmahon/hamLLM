@@ -4,7 +4,7 @@ import threading
 
 import pytest
 
-from hamllm import mcp
+from hamllm import mcp, profiles
 from hamllm.mcp import Server, serve
 from hamllm.ollama import OllamaError
 
@@ -13,7 +13,7 @@ def default_model(monkeypatch):
     monkeypatch.setenv("HAMLLM_MODEL", "m")
 
 
-PROFILE = {"m": {"ready": True, "categories": {"basic": 1.0, "instruction": 1.0}, "median_seconds": 1.0}}
+PROFILE = {"m": {"suite_version": profiles.PROFILE_SUITE_VERSION, "ready": True, "categories": {"basic": 1.0, "instruction": 1.0}, "median_seconds": 1.0}}
 
 
 class FakeClient:
@@ -111,10 +111,10 @@ def test_local_models_is_a_compact_summary():
 
 def test_local_models_flags_stale_profiles_and_orders_ready_first():
     saved = {
-        "slow": {"ready": True, "categories": {"basic": 1.0}, "median_seconds": 9.0},
-        "fast": {"ready": True, "categories": {"basic": 1.0}, "median_seconds": 1.0},
-        "bad": {"ready": False, "categories": {"basic": 0.2}, "median_seconds": 0.5},
-        "old": {"ready": True, "categories": {"basic": 1.0}, "digest": "x", "median_seconds": 0.1},
+        "slow": {"suite_version": profiles.PROFILE_SUITE_VERSION, "ready": True, "categories": {"basic": 1.0}, "median_seconds": 9.0},
+        "fast": {"suite_version": profiles.PROFILE_SUITE_VERSION, "ready": True, "categories": {"basic": 1.0}, "median_seconds": 1.0},
+        "bad": {"suite_version": profiles.PROFILE_SUITE_VERSION, "ready": False, "categories": {"basic": 0.2}, "median_seconds": 0.5},
+        "old": {"suite_version": profiles.PROFILE_SUITE_VERSION, "ready": True, "categories": {"basic": 1.0}, "digest": "x", "median_seconds": 0.1},
     }
     client = FakeClient(models=["slow", "fast", "bad", "old"])
     client.digests = {"old": "y"}
@@ -190,7 +190,7 @@ def test_explicit_nondefault_model_must_have_current_ready_profile():
         client,
         num_ctx=8192,
         keep_alive="5m",
-        load_profiles=lambda: {**PROFILE, "other": {"ready": False, "digest": "new", "categories": {"basic": 1.0}}},
+        load_profiles=lambda: {**PROFILE, "other": {"suite_version": profiles.PROFILE_SUITE_VERSION, "ready": False, "digest": "new", "categories": {"basic": 1.0}}},
     )
     result = call(failed, "ask_local", prompt="x", model="other")
     assert result["isError"] and "did not pass" in result["content"][0]["text"]
@@ -199,7 +199,7 @@ def test_explicit_nondefault_model_must_have_current_ready_profile():
         client,
         num_ctx=8192,
         keep_alive="5m",
-        load_profiles=lambda: {**PROFILE, "other": {"ready": True, "digest": "old", "categories": {"basic": 1.0}}},
+        load_profiles=lambda: {**PROFILE, "other": {"suite_version": profiles.PROFILE_SUITE_VERSION, "ready": True, "digest": "old", "categories": {"basic": 1.0}}},
     )
     result = call(stale, "ask_local", prompt="x", model="other")
     assert result["isError"] and "stale" in result["content"][0]["text"]
@@ -208,7 +208,7 @@ def test_explicit_nondefault_model_must_have_current_ready_profile():
         client,
         num_ctx=8192,
         keep_alive="5m",
-        load_profiles=lambda: {**PROFILE, "other": {"ready": True, "digest": "new", "categories": {"basic": 1.0}}},
+        load_profiles=lambda: {**PROFILE, "other": {"suite_version": profiles.PROFILE_SUITE_VERSION, "ready": True, "digest": "new", "categories": {"basic": 1.0}}},
     )
     assert call(ready, "ask_local", prompt="x", model="other")["isError"] is False
 
@@ -254,3 +254,18 @@ def test_prompt_budget_reserves_requested_output_tokens():
     result = call(server(client), "ask_local", prompt=almost_full)
     assert result["isError"] and "plus up to" in result["content"][0]["text"]
     assert client.generated == []
+
+
+def test_local_models_marks_older_suite_profiles_outdated():
+    saved = {
+        "m": {
+            "suite_version": profiles.PROFILE_SUITE_VERSION - 1,
+            "ready": True,
+            "categories": {"basic": 1.0, "instruction": 1.0},
+            "median_seconds": 1.0,
+        }
+    }
+    srv = Server(FakeClient(), num_ctx=8192, keep_alive="5m", load_profiles=lambda: saved)
+    text = call(srv, "local_models")["content"][0]["text"]
+    assert "fast -> unavailable" in text
+    assert "m: OUTDATED" in text
