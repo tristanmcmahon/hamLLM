@@ -5,7 +5,7 @@ import pytest
 from hamllm import profiles
 from hamllm.profiles import ResolutionError, resolve
 
-GOOD = {"categories": {"basic": 1.0, "instruction": 1.0, "tools": 1.0, "safety": 1.0, "coding": 1.0}, "median_seconds": 9.0}
+GOOD = {"suite_version": profiles.PROFILE_SUITE_VERSION, "categories": {"basic": 1.0, "instruction": 1.0, "tools": 1.0, "safety": 1.0, "coding": 1.0}, "median_seconds": 9.0}
 FAST_GOOD = {**GOOD, "median_seconds": 2.0}
 NO_CODE = {"categories": {"basic": 1.0, "instruction": 1.0, "tools": 1.0, "safety": 1.0, "coding": 0.0}, "median_seconds": 1.0}
 
@@ -80,7 +80,9 @@ def test_digest_change_voids_a_profile():
 def test_save_report_records_digest(tmp_path):
     path = tmp_path / "p.json"
     profiles.save_report({"model": "a", "ready": True, "threshold": 0.8, "categories": {}}, path, digest="sha-9")
-    assert profiles.load(path)["a"]["digest"] == "sha-9"
+    saved = profiles.load(path)["a"]
+    assert saved["digest"] == "sha-9"
+    assert saved["suite_version"] == profiles.PROFILE_SUITE_VERSION
 
 
 def test_ranking_weighs_evidence_not_just_the_rate():
@@ -93,7 +95,7 @@ def test_ranking_weighs_evidence_not_just_the_rate():
 
 
 def test_old_profiles_without_trials_still_rank():
-    old = {"categories": {"tools": 1.0, "safety": 1.0, "coding": 1.0}, "repeats": 3, "median_seconds": 1.0}
+    old = {"suite_version": profiles.PROFILE_SUITE_VERSION, "categories": {"tools": 1.0, "safety": 1.0, "coding": 1.0}, "repeats": 3, "median_seconds": 1.0}
     assert resolve("code", ["old"], {"old": old}) == "old"
 
 
@@ -128,3 +130,11 @@ def test_alias_speed_tiebreak_uses_only_required_categories():
         ["a", "b"],
         {"a": slow_fast_work, "b": quick_coding_but_slower_fast_work},
     ) == "a"
+
+
+def test_older_eval_suite_profiles_do_not_route():
+    old = {**GOOD, "suite_version": profiles.PROFILE_SUITE_VERSION - 1}
+    with pytest.raises(ResolutionError, match="older-suite"):
+        resolve("code", ["a"], {"a": old})
+    assert profiles.is_outdated(old)
+    assert not profiles.is_outdated(GOOD)
