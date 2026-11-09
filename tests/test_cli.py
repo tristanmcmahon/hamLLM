@@ -113,3 +113,23 @@ class ValidationTests(unittest.TestCase):
         server = serve.call_args.args[0]
         self.assertEqual(server.keep_alive, "7m")
         self.assertEqual(str(server.usage_log), "/tmp/hamllm-usage-test.jsonl")
+
+
+class EnvironmentValidationTests(unittest.TestCase):
+    @patch("hamllm.cli.OllamaClient")
+    def test_timeout_environment_must_be_positive_and_finite(self, client_type):
+        client_type.return_value.installed.return_value = {}
+        for value in ("0", "-1", "nan", "inf", "garbage"):
+            with self.subTest(value=value), patch.dict(
+                "os.environ", {"HAMLLM_TIMEOUT": value}, clear=False
+            ), self.assertRaises(SystemExit):
+                cli.main(["models"])
+
+    @patch("hamllm.mcp.serve", return_value=0)
+    @patch("hamllm.cli.OllamaClient")
+    def test_mcp_timeout_environment_must_be_positive_and_finite(self, client_type, serve):
+        for value in ("0", "nan", "garbage"):
+            with self.subTest(value=value), patch.dict(
+                "os.environ", {"HAMLLM_MCP_TIMEOUT": value}, clear=False
+            ), self.assertRaises(SystemExit):
+                cli.main(["mcp"])
