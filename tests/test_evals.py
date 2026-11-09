@@ -124,6 +124,12 @@ def test_rename_tests_accept_valid_variants_and_reject_partial_renames():
     assert not rename_tests({"greet.py": lib, "main.py": "from greet import greet\nprint(greet('bob'))\n"})[0]
     assert not rename_tests({"greet.py": "def greet(n): ...\n", "main.py": "from greet import welcome\nwelcome(1)\n"})[0]
 
+    # Textual decoys must not fool the checker.
+    fake_lib = "# def welcome(name):\ndef greet(name):\n    return 'hi ' + name\n"
+    fake_main = "# welcome('bob')\nimport greet\nprint('welcome')\n"
+    assert not rename_tests({"greet.py": fake_lib, "main.py": fake_main})[0]
+    assert not rename_tests({"greet.py": lib, "main.py": "# from greet import welcome\nprint('welcome()')\n"})[0]
+
 
 def test_multi_file_rename_end_to_end_with_scripted_model():
     client = ScriptedClient(
@@ -351,3 +357,18 @@ def test_runs_report_tool_call_retries_and_category_trials():
     assert summaries[0].retries == 1 and summaries[0].pass_rate == 1.0
     report = evals.report("m", summaries)
     assert report["trials"] == {"basic": 2} and report["retries"] == 1
+
+
+def test_report_uses_true_median_and_records_category_latency():
+    from hamllm.evals import Case, CaseSummary, RunResult, report
+
+    noop = lambda outcome: None
+    basic = Case("b", "basic", "", "", noop)
+    coding = Case("c", "coding", "", "", noop)
+    summaries = [
+        CaseSummary(basic, [RunResult(True, 1.0), RunResult(True, 3.0)]),
+        CaseSummary(coding, [RunResult(True, 100.0), RunResult(True, 200.0)]),
+    ]
+    got = report("m", summaries)
+    assert got["median_seconds"] == 51.5
+    assert got["category_median_seconds"] == {"basic": 2.0, "coding": 150.0}
