@@ -211,6 +211,6 @@ def resolve(
     if not candidates:
         raise ResolutionError(
             f"no installed model has passed {', '.join(required)} at {threshold:.0%}; "
-            f"run `hamllm eval --save --model TAG` to profile one (stale or older-suite profiles are ignored)"
+            f"run `hamllm eval --save --model TAG` to profile one (stale digest or older-suite profiles are ignored)"
         )
     return min(candidates, key=lambda item: (*_score(item[1], required), item[0]))[0]
