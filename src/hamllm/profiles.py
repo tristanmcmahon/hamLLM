@@ -18,6 +18,7 @@ from typing import Any
 from . import config
 
 DEFAULT_THRESHOLD = 0.8
+PROFILE_SUITE_VERSION = 2
 
 ALIASES: dict[str, tuple[str, ...]] = {
     "fast": ("basic", "instruction"),
@@ -86,6 +87,11 @@ def _valid_profile(profile: Any) -> bool:
     ready = profile.get("ready")
     if ready is not None and not isinstance(ready, bool):
         return False
+    suite_version = profile.get("suite_version")
+    if suite_version is not None and (
+        isinstance(suite_version, bool) or not isinstance(suite_version, int) or suite_version < 1
+    ):
+        return False
     return True
 
 
@@ -109,6 +115,7 @@ def save_report(report: dict[str, Any], path: Path | None = None, *, digest: str
     profiles = load(target)
     profiles[report["model"]] = {
         "digest": digest or None,
+        "suite_version": PROFILE_SUITE_VERSION,
         "evaluated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "ready": report["ready"],
         "threshold": report["threshold"],
@@ -164,6 +171,11 @@ def is_stale(profile: dict[str, Any], digest: str | None) -> bool:
     return bool(digest and profile.get("digest") and profile["digest"] != digest)
 
 
+def is_outdated(profile: dict[str, Any]) -> bool:
+    """A changed eval suite voids old capability claims even when model weights are unchanged."""
+    return profile.get("suite_version") != PROFILE_SUITE_VERSION
+
+
 def resolve(
     name: str,
     installed: list[str],
@@ -194,10 +206,11 @@ def resolve(
         if model in profiles
         and qualifies(profiles[model], required, threshold)
         and not is_stale(profiles[model], digests.get(model))
+        and not is_outdated(profiles[model])
     ]
     if not candidates:
         raise ResolutionError(
             f"no installed model has passed {', '.join(required)} at {threshold:.0%}; "
-            f"run `hamllm eval --save --model TAG` to profile one (profiles are ignored once a tag's digest changes)"
+            f"run `hamllm eval --save --model TAG` to profile one (stale or older-suite profiles are ignored)"
         )
     return min(candidates, key=lambda item: (*_score(item[1], required), item[0]))[0]
