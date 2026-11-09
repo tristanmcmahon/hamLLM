@@ -266,7 +266,11 @@ def evaluate(args: argparse.Namespace) -> int:
 def mcp_server(args: argparse.Namespace) -> int:
     from .mcp import Server, serve
 
-    mcp_timeout = _environment_positive_float("HAMLLM_MCP_TIMEOUT", MCP_TIMEOUT_SECONDS)
+    mcp_timeout = (
+        _environment_positive_float("HAMLLM_MCP_TIMEOUT", MCP_TIMEOUT_SECONDS)
+        if args.timeout is None
+        else MCP_TIMEOUT_SECONDS
+    )
     return serve(
         Server(
             _client(args, default_timeout=mcp_timeout),
