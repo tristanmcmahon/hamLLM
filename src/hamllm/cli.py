@@ -95,6 +95,8 @@ def _profile_summary(profile: dict | None, digest: str) -> str:
     state = "ready" if profile.get("ready") else "NOT ready"
     if profiles.is_stale(profile, digest):
         return f"STALE (weights changed since {profile.get('evaluated_at')}); re-run eval"
+    if profiles.is_outdated(profile):
+        return f"OUTDATED (eval suite changed since {profile.get('evaluated_at')}); re-run eval"
     rates = ", ".join(f"{c} {r:.0%}" for c, r in (profile.get("categories") or {}).items())
     return f"{state} ({rates}) evaluated {profile.get('evaluated_at')}"
 
