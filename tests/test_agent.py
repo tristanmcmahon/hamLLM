@@ -89,7 +89,11 @@ def test_successful_mutation_invalidates_observation_cache():
     runtime = AgentRuntime(
         client=client,
         model="gwen",
-        tools=ToolRegistry(caller=caller, mutating_tools=frozenset({"write"})),
+        tools=ToolRegistry(
+            caller=caller,
+            observational_tools=frozenset({"inspect"}),
+            mutating_tools=frozenset({"write"}),
+        ),
     )
     messages = [{"role": "user", "content": "change it"}]
 
@@ -103,7 +107,10 @@ def test_tool_budget_finishes_without_tools_and_reports_constraint():
     runtime = AgentRuntime(
         client=client,
         model="gwen",
-        tools=ToolRegistry(caller=lambda *args, **kwargs: json.dumps({"ok": True})),
+        tools=ToolRegistry(
+            caller=lambda *args, **kwargs: json.dumps({"ok": True}),
+            observational_tools=frozenset({"inspect"}),
+        ),
         max_tool_rounds=1,
     )
     messages = [{"role": "user", "content": "do several things"}]
