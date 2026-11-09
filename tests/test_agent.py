@@ -37,7 +37,15 @@ def test_duplicate_observation_is_not_executed_twice():
         calls.append((name, arguments, allow_mutation))
         return json.dumps({"ok": True, "result": "x"})
 
-    runtime = AgentRuntime(client=client, model="gwen", tools=ToolRegistry(schemas=[{"x": 1}], caller=caller))
+    runtime = AgentRuntime(
+        client=client,
+        model="gwen",
+        tools=ToolRegistry(
+            schemas=[{"type": "function", "function": {"name": "inspect"}}],
+            caller=caller,
+            observational_tools=frozenset({"inspect"}),
+        ),
+    )
     messages = [{"role": "user", "content": "inspect"}]
 
     assert runtime.run_turn(messages) == "done"
@@ -81,7 +89,11 @@ def test_successful_mutation_invalidates_observation_cache():
     runtime = AgentRuntime(
         client=client,
         model="gwen",
-        tools=ToolRegistry(caller=caller, mutating_tools=frozenset({"write"})),
+        tools=ToolRegistry(
+            caller=caller,
+            observational_tools=frozenset({"inspect"}),
+            mutating_tools=frozenset({"write"}),
+        ),
     )
     messages = [{"role": "user", "content": "change it"}]
 
@@ -95,7 +107,10 @@ def test_tool_budget_finishes_without_tools_and_reports_constraint():
     runtime = AgentRuntime(
         client=client,
         model="gwen",
-        tools=ToolRegistry(caller=lambda *args, **kwargs: json.dumps({"ok": True})),
+        tools=ToolRegistry(
+            caller=lambda *args, **kwargs: json.dumps({"ok": True}),
+            observational_tools=frozenset({"inspect"}),
+        ),
         max_tool_rounds=1,
     )
     messages = [{"role": "user", "content": "do several things"}]
@@ -183,3 +198,53 @@ def test_malformed_tool_call_500_is_retried_once_then_surfaced():
     with pytest.raises(OllamaError):
         AgentRuntime(client=other, model="m").run_turn([{"role": "user", "content": "x"}])
     assert other.calls == 1  # unrelated failures are never retried
+
+
+def test_declared_tool_without_classification_fails_closed_before_model_call():
+    client = FakeClient([answer("should not run")])
+    runtime = AgentRuntime(
+        client=client,
+        model="m",
+        tools=ToolRegistry(
+            schemas=[{"type": "function", "function": {"name": "delete_everything"}}],
+            caller=lambda *args, **kwargs: json.dumps({"ok": True}),
+        ),
+    )
+    with pytest.raises(ValueError, match="unclassified"):
+        runtime.run_turn([{"role": "user", "content": "go"}])
+    assert client.calls == []
+
+
+def test_conflicting_tool_classification_is_rejected():
+    client = FakeClient([answer("should not run")])
+    runtime = AgentRuntime(
+        client=client,
+        model="m",
+        tools=ToolRegistry(
+            schemas=[{"type": "function", "function": {"name": "inspect"}}],
+            caller=lambda *args, **kwargs: json.dumps({"ok": True}),
+            observational_tools=frozenset({"inspect"}),
+            mutating_tools=frozenset({"inspect"}),
+        ),
+    )
+    with pytest.raises(ValueError, match="conflicting"):
+        runtime.run_turn([{"role": "user", "content": "go"}])
+    assert client.calls == []
+
+
+def test_hallucinated_unclassified_tool_is_not_executed():
+    client = FakeClient([tool_call("delete_everything", {}), answer("not done")])
+    calls = []
+    runtime = AgentRuntime(
+        client=client,
+        model="m",
+        tools=ToolRegistry(
+            schemas=[{"type": "function", "function": {"name": "inspect"}}],
+            caller=lambda name, arguments, **kwargs: calls.append(name) or json.dumps({"ok": True}),
+            observational_tools=frozenset({"inspect"}),
+        ),
+    )
+    messages = [{"role": "user", "content": "go"}]
+    assert runtime.run_turn(messages) == "not done"
+    assert calls == []
+    assert "not classified" in messages[-2]["content"]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from typing import Sequence
@@ -13,15 +14,64 @@ from .ollama import DEFAULT_HOST, DEFAULT_TIMEOUT_SECONDS, OllamaClient, OllamaE
 MCP_TIMEOUT_SECONDS = 120.0
 
 
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive integer") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def _positive_float(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive finite number") from exc
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive finite number")
+    return parsed
+
+
+def _environment_positive_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        parsed = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive finite number") from exc
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise ValueError(f"{name} must be a positive finite number")
+    return parsed
+
+
+def _probability(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be between 0 and 1") from exc
+    if not 0.0 <= parsed <= 1.0:
+        raise argparse.ArgumentTypeError("must be between 0 and 1")
+    return parsed
+
+
 def _client(args: argparse.Namespace, *, default_timeout: float | None = None) -> OllamaClient:
     timeout = args.timeout
     if timeout is None:
-        timeout = default_timeout or float(os.environ.get("HAMLLM_TIMEOUT") or DEFAULT_TIMEOUT_SECONDS)
+        timeout = default_timeout if default_timeout is not None else _environment_positive_float(
+            "HAMLLM_TIMEOUT", DEFAULT_TIMEOUT_SECONDS
+        )
     return OllamaClient(args.host, timeout)
 
 
+def _num_ctx(args: argparse.Namespace) -> int:
+    return args.num_ctx if args.num_ctx is not None else config.num_ctx()
+
+
 def _options(args: argparse.Namespace) -> dict[str, int]:
-    return {"num_ctx": args.num_ctx}
+    return {"num_ctx": _num_ctx(args)}
 
 
 def _prompt(words: list[str]) -> str:
@@ -61,6 +111,8 @@ def _profile_summary(profile: dict | None, digest: str) -> str:
     state = "ready" if profile.get("ready") else "NOT ready"
     if profiles.is_stale(profile, digest):
         return f"STALE (weights changed since {profile.get('evaluated_at')}); re-run eval"
+    if profiles.is_outdated(profile):
+        return f"OUTDATED (eval suite changed since {profile.get('evaluated_at')}); re-run eval"
     rates = ", ".join(f"{c} {r:.0%}" for c, r in (profile.get("categories") or {}).items())
     return f"{state} ({rates}) evaluated {profile.get('evaluated_at')}"
 
@@ -214,8 +266,19 @@ def evaluate(args: argparse.Namespace) -> int:
 def mcp_server(args: argparse.Namespace) -> int:
     from .mcp import Server, serve
 
-    mcp_timeout = float(os.environ.get("HAMLLM_MCP_TIMEOUT") or MCP_TIMEOUT_SECONDS)
-    return serve(Server(_client(args, default_timeout=mcp_timeout), num_ctx=args.num_ctx))
+    mcp_timeout = (
+        _environment_positive_float("HAMLLM_MCP_TIMEOUT", MCP_TIMEOUT_SECONDS)
+        if args.timeout is None
+        else MCP_TIMEOUT_SECONDS
+    )
+    return serve(
+        Server(
+            _client(args, default_timeout=mcp_timeout),
+            num_ctx=_num_ctx(args),
+            keep_alive=config.mcp_keep_alive(),
+            usage_log=config.usage_log_path(),
+        )
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -236,15 +299,15 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--model", default=config.default_model())
     common.add_argument(
         "--timeout",
-        type=float,
+        type=_positive_float,
         default=None,
         help="request timeout in seconds (env HAMLLM_TIMEOUT, default 300; 120 for mcp via HAMLLM_MCP_TIMEOUT)",
     )
     common.add_argument(
         "--num-ctx",
-        type=int,
-        default=config.num_ctx(),
-        help="context window in tokens (env HAMLLM_NUM_CTX)",
+        type=_positive_int,
+        default=None,
+        help="context window in tokens (env HAMLLM_NUM_CTX; default 16384)",
     )
     common.add_argument(
         "--reasoning",
@@ -277,8 +340,8 @@ def build_parser() -> argparse.ArgumentParser:
     probe = commands.add_parser(
         "eval", parents=[common], help="test whether the model can field real requests"
     )
-    probe.add_argument("--repeats", type=int, default=1, help="runs per case")
-    probe.add_argument("--threshold", type=float, default=profiles.DEFAULT_THRESHOLD, help="min pass rate per category")
+    probe.add_argument("--repeats", type=_positive_int, default=1, help="runs per case")
+    probe.add_argument("--threshold", type=_probability, default=profiles.DEFAULT_THRESHOLD, help="min pass rate per category")
     probe.add_argument("--category", action="append", help="limit to a category (repeatable)")
     probe.add_argument("--all", action="store_true", help="evaluate every installed text-generation model and compare")
     probe.add_argument("--save", action="store_true", help="store the result as this model's capability profile")
@@ -289,7 +352,7 @@ def build_parser() -> argparse.ArgumentParser:
         "resolve", parents=[common], help="print the installed model an alias resolves to"
     )
     resolve.add_argument("name", help="tag or alias: " + ", ".join([profiles.DEFAULT_ALIAS, *profiles.ALIASES]))
-    resolve.add_argument("--threshold", type=float, default=profiles.DEFAULT_THRESHOLD)
+    resolve.add_argument("--threshold", type=_probability, default=profiles.DEFAULT_THRESHOLD)
     resolve.set_defaults(handler=resolve_model)
 
     serve = commands.add_parser(

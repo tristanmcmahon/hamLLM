@@ -1,10 +1,12 @@
 import io
 import json
 import unittest
+
+import pytest
 import urllib.error
 from unittest.mock import patch
 
-from hamllm.ollama import OllamaClient, OllamaError
+from hamllm.ollama import OllamaCancelled, OllamaClient, OllamaError
 
 
 class Response:
@@ -114,3 +116,49 @@ class OllamaClientTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StreamingResponse:
+    def __init__(self, payloads):
+        self.lines = [(json.dumps(payload) + "\n").encode() for payload in payloads]
+        self.closed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        self.closed = True
+        return False
+
+    def __iter__(self):
+        return iter(self.lines)
+
+    def close(self):
+        self.closed = True
+
+
+def test_cancellable_generate_uses_streaming_and_combines_chunks():
+    response = StreamingResponse([
+        {"response": "hel", "done": False},
+        {"response": "lo", "done": True},
+    ])
+    with patch("urllib.request.urlopen", return_value=response) as urlopen:
+        got = OllamaClient("http://localhost:11434").generate(
+            "m", "hi", cancelled=lambda: False
+        )
+    assert got == "hello"
+    assert json.loads(urlopen.call_args.args[0].data)["stream"] is True
+
+
+def test_cancellable_generate_closes_stream_when_cancelled():
+    response = StreamingResponse([
+        {"response": "first", "done": False},
+        {"response": "second", "done": False},
+    ])
+    checks = iter([False, False, True])
+    with patch("urllib.request.urlopen", return_value=response):
+        with pytest.raises(OllamaCancelled):
+            OllamaClient("http://localhost:11434").generate(
+                "m", "hi", cancelled=lambda: next(checks)
+            )
+    assert response.closed

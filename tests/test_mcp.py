@@ -1,9 +1,10 @@
 import io
 import json
+import threading
 
 import pytest
 
-from hamllm import mcp
+from hamllm import mcp, profiles
 from hamllm.mcp import Server, serve
 from hamllm.ollama import OllamaError
 
@@ -12,7 +13,7 @@ def default_model(monkeypatch):
     monkeypatch.setenv("HAMLLM_MODEL", "m")
 
 
-PROFILE = {"m": {"ready": True, "categories": {"basic": 1.0, "instruction": 1.0}, "median_seconds": 1.0}}
+PROFILE = {"m": {"suite_version": profiles.PROFILE_SUITE_VERSION, "ready": True, "categories": {"basic": 1.0, "instruction": 1.0}, "median_seconds": 1.0}}
 
 
 class FakeClient:
@@ -110,17 +111,17 @@ def test_local_models_is_a_compact_summary():
 
 def test_local_models_flags_stale_profiles_and_orders_ready_first():
     saved = {
-        "slow": {"ready": True, "categories": {"basic": 1.0}, "median_seconds": 9.0},
-        "fast": {"ready": True, "categories": {"basic": 1.0}, "median_seconds": 1.0},
-        "bad": {"ready": False, "categories": {"basic": 0.2}, "median_seconds": 0.5},
-        "old": {"ready": True, "categories": {"basic": 1.0}, "digest": "x", "median_seconds": 0.1},
+        "slow": {"suite_version": profiles.PROFILE_SUITE_VERSION, "ready": True, "categories": {"basic": 1.0}, "median_seconds": 9.0},
+        "fast": {"suite_version": profiles.PROFILE_SUITE_VERSION, "ready": True, "categories": {"basic": 1.0}, "median_seconds": 1.0},
+        "bad": {"suite_version": profiles.PROFILE_SUITE_VERSION, "ready": False, "categories": {"basic": 0.2}, "median_seconds": 0.5},
+        "old": {"suite_version": profiles.PROFILE_SUITE_VERSION, "ready": True, "categories": {"basic": 1.0}, "digest": "x", "median_seconds": 0.1},
     }
     client = FakeClient(models=["slow", "fast", "bad", "old"])
     client.digests = {"old": "y"}
     srv = Server(client, num_ctx=8192, keep_alive="5m", load_profiles=lambda: saved)
     lines = call(srv, "local_models")["content"][0]["text"].splitlines()
     order = [ln.split(":")[0] for ln in lines if ": " in ln and not ln.startswith("not profiled")]
-    assert order == ["old", "fast", "slow", "bad"]  # ready first (fastest first); not-ready last
+    assert order == ["fast", "slow", "bad", "old"]  # current ready first; stale profiles last
     assert any(ln.startswith("old: STALE") for ln in lines)
 
 
@@ -175,3 +176,96 @@ def test_unprofiled_models_are_not_loadable_over_mcp_except_the_default():
     profiled = {**PROFILE, "big:70b": PROFILE["m"]}
     ok = Server(client, num_ctx=8192, keep_alive="5m", load_profiles=lambda: profiled)
     assert call(ok, "ask_local", prompt="x", model="big:70b")["isError"] is False
+
+
+def test_explicit_nondefault_model_must_have_current_ready_profile():
+    client = FakeClient(models=["m", "other"])
+    client.digests = {"other": "new"}
+
+    unprofiled = server(client)
+    result = call(unprofiled, "ask_local", prompt="x", model="other")
+    assert result["isError"] and "never been profiled" in result["content"][0]["text"]
+
+    failed = Server(
+        client,
+        num_ctx=8192,
+        keep_alive="5m",
+        load_profiles=lambda: {**PROFILE, "other": {"suite_version": profiles.PROFILE_SUITE_VERSION, "ready": False, "digest": "new", "categories": {"basic": 1.0}}},
+    )
+    result = call(failed, "ask_local", prompt="x", model="other")
+    assert result["isError"] and "did not pass" in result["content"][0]["text"]
+
+    stale = Server(
+        client,
+        num_ctx=8192,
+        keep_alive="5m",
+        load_profiles=lambda: {**PROFILE, "other": {"suite_version": profiles.PROFILE_SUITE_VERSION, "ready": True, "digest": "old", "categories": {"basic": 1.0}}},
+    )
+    result = call(stale, "ask_local", prompt="x", model="other")
+    assert result["isError"] and "stale" in result["content"][0]["text"]
+
+    ready = Server(
+        client,
+        num_ctx=8192,
+        keep_alive="5m",
+        load_profiles=lambda: {**PROFILE, "other": {"suite_version": profiles.PROFILE_SUITE_VERSION, "ready": True, "digest": "new", "categories": {"basic": 1.0}}},
+    )
+    assert call(ready, "ask_local", prompt="x", model="other")["isError"] is False
+
+
+def test_usage_log_records_metadata_never_prompt_text(tmp_path):
+    client = FakeClient("secret answer")
+    log = tmp_path / "usage.jsonl"
+    srv = Server(client, num_ctx=8192, keep_alive="5m", usage_log=log, load_profiles=lambda: PROFILE)
+    result = call(srv, "ask_local", prompt="TOP SECRET PROMPT")
+    assert result["isError"] is False
+    record = json.loads(log.read_text())
+    assert record["model"] == "m" and record["status"] == "ok"
+    assert record["prompt_chars"] > 0 and record["response_chars"] == len("secret answer")
+    assert "TOP SECRET" not in log.read_text() and "secret answer" not in log.read_text()
+
+
+def test_serve_processes_cancellation_while_gpu_worker_is_busy():
+    from hamllm.ollama import OllamaCancelled
+
+    class Cancellable(FakeClient):
+        def generate(self, model, prompt, system=None, *, cancelled=None, **kwargs):
+            assert cancelled is not None
+            while not cancelled():
+                threading.Event().wait(0.001)
+            raise OllamaCancelled("request cancelled")
+
+    lines = [
+        json.dumps({"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+                    "params": {"name": "ask_local", "arguments": {"prompt": "x"}}}),
+        json.dumps({"jsonrpc": "2.0", "method": "notifications/cancelled",
+                    "params": {"requestId": 7, "reason": "user stopped"}}),
+    ]
+    out = io.StringIO()
+    assert serve(server(Cancellable()), io.StringIO("\n".join(lines) + "\n"), out) == 0
+    replies = [json.loads(line) for line in out.getvalue().splitlines()]
+    assert len(replies) == 1
+    assert replies[0]["id"] == 7 and replies[0]["error"]["code"] == mcp.REQUEST_CANCELLED
+
+
+def test_prompt_budget_reserves_requested_output_tokens():
+    client = FakeClient()
+    almost_full = "x" * ((8192 - mcp.DEFAULT_MAX_TOKENS + 1) * mcp.CHARS_PER_TOKEN)
+    result = call(server(client), "ask_local", prompt=almost_full)
+    assert result["isError"] and "plus up to" in result["content"][0]["text"]
+    assert client.generated == []
+
+
+def test_local_models_marks_older_suite_profiles_outdated():
+    saved = {
+        "m": {
+            "suite_version": profiles.PROFILE_SUITE_VERSION - 1,
+            "ready": True,
+            "categories": {"basic": 1.0, "instruction": 1.0},
+            "median_seconds": 1.0,
+        }
+    }
+    srv = Server(FakeClient(), num_ctx=8192, keep_alive="5m", load_profiles=lambda: saved)
+    text = call(srv, "local_models")["content"][0]["text"]
+    assert "fast -> unavailable" in text
+    assert "m: OUTDATED" in text

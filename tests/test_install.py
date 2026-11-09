@@ -84,6 +84,9 @@ def test_install_writes_a_working_launcher_and_registers_both_clients(env):
     out = install(env).stdout
     launcher = Path(env["PREFIX"], "bin", "hamllm")
     assert launcher.exists() and os.access(launcher, os.X_OK)
+    launcher_text = launcher.read_text()
+    assert "exec python3 -m hamllm" in launcher_text
+    assert "exec \"" not in launcher_text
     version = subprocess.run([str(launcher), "--version"], capture_output=True, text=True, env=env)
     assert version.stdout.startswith("hamLLM ")
     assert "OK: MCP server answers and offers ask_local" in out
@@ -181,7 +184,7 @@ def test_zed_jsonc_preserves_unrelated_settings_and_servers_with_backup(env):
     install(env, "--uninstall", "--zed")
     assert path.read_text() == original
     assert len(zed_backups(env)) == 2
-    assert not Path(env["PREFIX"], "bin", "hamllm").exists()
+    assert Path(env["PREFIX"], "bin", "hamllm").exists()
 
 
 def test_zed_existing_entry_updates_only_its_value_and_host(env):
@@ -266,3 +269,28 @@ def test_a_failed_registration_is_reported_and_fails_the_install_but_not_the_oth
 
 def test_env_flag_is_not_followed_by_the_bare_server_name(env):
     install(env, "--claude")  # the stub rejects `--env K=V hamllm` like real Claude Code
+
+
+def test_scoped_uninstall_keeps_shared_launcher_and_other_client_state(env):
+    install(env, "--instructions")
+    launcher = Path(env["PREFIX"], "bin", "hamllm")
+    assert launcher.exists()
+    assert "hamllm" in zed_settings(env).read_text()
+    assert Path(env["HOME"], ".claude", "CLAUDE.md").exists()
+    assert Path(env["HOME"], ".codex", "AGENTS.md").exists()
+
+    out = install(env, "--uninstall", "--claude").stdout
+    assert "Kept shared launcher" in out and launcher.exists()
+    assert "hamllm" in zed_settings(env).read_text()
+    assert not Path(env["HOME"], ".claude", "CLAUDE.md").exists()
+    assert Path(env["HOME"], ".codex", "AGENTS.md").exists()
+
+    install(env, "--uninstall")
+    assert not launcher.exists()
+    assert "hamllm" not in zed_settings(env).read_text()
+
+
+def test_scoped_instruction_install_only_touches_selected_client(env):
+    install(env, "--claude", "--instructions")
+    assert Path(env["HOME"], ".claude", "CLAUDE.md").exists()
+    assert not Path(env["HOME"], ".codex", "AGENTS.md").exists()

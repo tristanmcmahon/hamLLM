@@ -5,9 +5,9 @@ import pytest
 from hamllm import profiles
 from hamllm.profiles import ResolutionError, resolve
 
-GOOD = {"categories": {"basic": 1.0, "instruction": 1.0, "tools": 1.0, "safety": 1.0, "coding": 1.0}, "median_seconds": 9.0}
+GOOD = {"suite_version": profiles.PROFILE_SUITE_VERSION, "categories": {"basic": 1.0, "instruction": 1.0, "tools": 1.0, "safety": 1.0, "coding": 1.0}, "median_seconds": 9.0}
 FAST_GOOD = {**GOOD, "median_seconds": 2.0}
-NO_CODE = {"categories": {"basic": 1.0, "instruction": 1.0, "tools": 1.0, "safety": 1.0, "coding": 0.0}, "median_seconds": 1.0}
+NO_CODE = {"suite_version": profiles.PROFILE_SUITE_VERSION, "categories": {"basic": 1.0, "instruction": 1.0, "tools": 1.0, "safety": 1.0, "coding": 0.0}, "median_seconds": 1.0}
 
 
 def test_installed_tag_resolves_to_itself_even_unprofiled():
@@ -22,8 +22,8 @@ def test_alias_picks_best_qualifying_model_then_fastest():
 
 def test_alias_ranks_by_score_before_speed():
     saved = {
-        "slow-strong": {"categories": {"basic": 1.0, "instruction": 1.0}, "median_seconds": 30.0},
-        "fast-weak": {"categories": {"basic": 0.8, "instruction": 0.8}, "median_seconds": 1.0},
+        "slow-strong": {"suite_version": profiles.PROFILE_SUITE_VERSION, "categories": {"basic": 1.0, "instruction": 1.0}, "median_seconds": 30.0},
+        "fast-weak": {"suite_version": profiles.PROFILE_SUITE_VERSION, "categories": {"basic": 0.8, "instruction": 0.8}, "median_seconds": 1.0},
     }
     assert resolve("fast", ["slow-strong", "fast-weak"], saved) == "slow-strong"
 
@@ -80,18 +80,74 @@ def test_digest_change_voids_a_profile():
 def test_save_report_records_digest(tmp_path):
     path = tmp_path / "p.json"
     profiles.save_report({"model": "a", "ready": True, "threshold": 0.8, "categories": {}}, path, digest="sha-9")
-    assert profiles.load(path)["a"]["digest"] == "sha-9"
+    saved = profiles.load(path)["a"]
+    assert saved["digest"] == "sha-9"
+    assert saved["suite_version"] == profiles.PROFILE_SUITE_VERSION
 
 
 def test_ranking_weighs_evidence_not_just_the_rate():
-    thin = {"categories": {"tools": 1.0, "safety": 1.0, "coding": 1.0}, "trials": {"tools": 9, "safety": 9, "coding": 9}, "median_seconds": 1.0}
-    solid = {"categories": {"tools": 1.0, "safety": 1.0, "coding": 1.0}, "trials": {"tools": 25, "safety": 20, "coding": 10}, "median_seconds": 9.0}
+    thin = {"suite_version": profiles.PROFILE_SUITE_VERSION, "categories": {"tools": 1.0, "safety": 1.0, "coding": 1.0}, "trials": {"tools": 9, "safety": 9, "coding": 9}, "median_seconds": 1.0}
+    solid = {"suite_version": profiles.PROFILE_SUITE_VERSION, "categories": {"tools": 1.0, "safety": 1.0, "coding": 1.0}, "trials": {"tools": 25, "safety": 20, "coding": 10}, "median_seconds": 9.0}
     assert resolve("code", ["thin", "solid"], {"thin": thin, "solid": solid}) == "solid"
     lucky = {**thin, "trials": {"tools": 3, "safety": 3, "coding": 3}}
-    steady = {"categories": {"tools": 0.97, "safety": 0.97, "coding": 0.97}, "trials": {"tools": 100, "safety": 100, "coding": 100}, "median_seconds": 9.0}
+    steady = {"suite_version": profiles.PROFILE_SUITE_VERSION, "categories": {"tools": 0.97, "safety": 0.97, "coding": 0.97}, "trials": {"tools": 100, "safety": 100, "coding": 100}, "median_seconds": 9.0}
     assert resolve("code", ["lucky", "steady"], {"lucky": lucky, "steady": steady}) == "steady"
 
 
 def test_old_profiles_without_trials_still_rank():
-    old = {"categories": {"tools": 1.0, "safety": 1.0, "coding": 1.0}, "repeats": 3, "median_seconds": 1.0}
+    old = {"suite_version": profiles.PROFILE_SUITE_VERSION, "categories": {"tools": 1.0, "safety": 1.0, "coding": 1.0}, "repeats": 3, "median_seconds": 1.0}
     assert resolve("code", ["old"], {"old": old}) == "old"
+
+
+def test_load_drops_semantically_invalid_profiles(tmp_path):
+    path = tmp_path / "profiles.json"
+    path.write_text(json.dumps({
+        "good": GOOD,
+        "string": "oops",
+        "bad-rate": {"categories": {"basic": 2.0}},
+        "bad-trials": {"categories": {"basic": 1.0}, "trials": {"basic": -1}},
+        "bad-repeats": {"categories": {"basic": 1.0}, "repeats": "five"},
+        "bad-latency": {"categories": {"basic": 1.0}, "category_median_seconds": {"basic": "fast"}},
+    }))
+    loaded = profiles.load(path)
+    assert set(loaded) == {"good"}
+
+
+def test_alias_speed_tiebreak_uses_only_required_categories():
+    slow_fast_work = {
+        "suite_version": profiles.PROFILE_SUITE_VERSION,
+        "categories": {"basic": 1.0, "instruction": 1.0, "coding": 1.0},
+        "trials": {"basic": 20, "instruction": 20, "coding": 20},
+        "category_median_seconds": {"basic": 1.0, "instruction": 1.0, "coding": 100.0},
+        "median_seconds": 50.0,
+    }
+    quick_coding_but_slower_fast_work = {
+        "suite_version": profiles.PROFILE_SUITE_VERSION,
+        "categories": {"basic": 1.0, "instruction": 1.0, "coding": 1.0},
+        "trials": {"basic": 20, "instruction": 20, "coding": 20},
+        "category_median_seconds": {"basic": 2.0, "instruction": 2.0, "coding": 1.0},
+        "median_seconds": 1.5,
+    }
+    assert resolve(
+        "fast",
+        ["a", "b"],
+        {"a": slow_fast_work, "b": quick_coding_but_slower_fast_work},
+    ) == "a"
+
+
+def test_older_eval_suite_profiles_do_not_route():
+    old = {**GOOD, "suite_version": profiles.PROFILE_SUITE_VERSION - 1}
+    with pytest.raises(ResolutionError, match="older-suite"):
+        resolve("code", ["a"], {"a": old})
+    assert profiles.is_outdated(old)
+    assert not profiles.is_outdated(GOOD)
+
+
+def test_zero_threshold_does_not_make_missing_categories_qualify():
+    partial = {
+        "suite_version": profiles.PROFILE_SUITE_VERSION,
+        "categories": {"tools": 1.0},
+        "median_seconds": 1.0,
+    }
+    with pytest.raises(ResolutionError):
+        resolve("code", ["partial"], {"partial": partial}, threshold=0.0)

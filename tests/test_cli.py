@@ -46,7 +46,8 @@ class DoctorAliasTests(unittest.TestCase):
         client = client_type.return_value
         client.version.return_value = "0.11.0"
         client.installed.return_value = {"gemma4:12b": "sha"}
-        load.return_value = {"gemma4:12b": {"ready": True, "digest": "sha", "evaluated_at": "t",
+        load.return_value = {"gemma4:12b": {"suite_version": cli.profiles.PROFILE_SUITE_VERSION,
+                                           "ready": True, "digest": "sha", "evaluated_at": "t",
                                            "categories": {"tools": 1.0, "safety": 1.0, "coding": 1.0}}}
         output = io.StringIO()
         with redirect_stdout(output):
@@ -79,3 +80,65 @@ class TimeoutDefaultTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ValidationTests(unittest.TestCase):
+    def test_numeric_cli_limits_reject_invalid_values(self):
+        for argv in (
+            ["run", "--num-ctx", "0", "x"],
+            ["run", "--timeout", "0", "x"],
+            ["eval", "--repeats", "0"],
+            ["eval", "--threshold", "1.1"],
+            ["resolve", "fast", "--threshold", "-0.1"],
+        ):
+            with self.subTest(argv=argv), self.assertRaises(SystemExit):
+                cli.main(argv)
+
+    @patch("hamllm.cli.OllamaClient")
+    def test_bad_context_environment_fails_cleanly(self, client_type):
+        client_type.return_value.installed.return_value = {"gpt-oss:20b": "sha"}
+        with patch.dict("os.environ", {"HAMLLM_NUM_CTX": "bogus"}, clear=False):
+            with self.assertRaises(SystemExit):
+                cli.main(["run", "hello"])
+
+    @patch("hamllm.mcp.serve", return_value=0)
+    @patch("hamllm.cli.OllamaClient")
+    def test_mcp_uses_shorter_keepalive_and_usage_log_from_environment(self, client_type, serve):
+        with patch.dict(
+            "os.environ",
+            {"HAMLLM_MCP_KEEP_ALIVE": "7m", "HAMLLM_USAGE_LOG": "/tmp/hamllm-usage-test.jsonl"},
+            clear=False,
+        ):
+            self.assertEqual(cli.main(["mcp"]), 0)
+        server = serve.call_args.args[0]
+        self.assertEqual(server.keep_alive, "7m")
+        self.assertEqual(str(server.usage_log), "/tmp/hamllm-usage-test.jsonl")
+
+
+class EnvironmentValidationTests(unittest.TestCase):
+    @patch("hamllm.cli.OllamaClient")
+    def test_timeout_environment_must_be_positive_and_finite(self, client_type):
+        client_type.return_value.installed.return_value = {}
+        for value in ("0", "-1", "nan", "inf", "garbage"):
+            with self.subTest(value=value), patch.dict(
+                "os.environ", {"HAMLLM_TIMEOUT": value}, clear=False
+            ), self.assertRaises(SystemExit):
+                cli.main(["models"])
+
+    @patch("hamllm.mcp.serve", return_value=0)
+    @patch("hamllm.cli.OllamaClient")
+    def test_mcp_timeout_environment_must_be_positive_and_finite(self, client_type, serve):
+        for value in ("0", "nan", "garbage"):
+            with self.subTest(value=value), patch.dict(
+                "os.environ", {"HAMLLM_MCP_TIMEOUT": value}, clear=False
+            ), self.assertRaises(SystemExit):
+                cli.main(["mcp"])
+
+
+class TimeoutPrecedenceTests(unittest.TestCase):
+    def test_explicit_mcp_timeout_overrides_invalid_environment(self):
+        with patch.dict("os.environ", {"HAMLLM_MCP_TIMEOUT": "garbage"}, clear=False), patch(
+            "hamllm.cli.OllamaClient"
+        ) as client_type, patch("hamllm.mcp.serve", return_value=0):
+            self.assertEqual(cli.main(["mcp", "--timeout", "9"]), 0)
+        self.assertEqual(client_type.call_args.args[1], 9.0)

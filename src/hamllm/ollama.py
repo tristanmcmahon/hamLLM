@@ -7,7 +7,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 DEFAULT_HOST = "http://127.0.0.1:11434"
 DEFAULT_TIMEOUT_SECONDS = 300.0
@@ -15,6 +15,10 @@ DEFAULT_TIMEOUT_SECONDS = 300.0
 
 class OllamaError(RuntimeError):
     """A local Ollama request failed or returned an invalid response."""
+
+
+class OllamaCancelled(OllamaError):
+    """A cancellable local Ollama request was stopped by its caller."""
 
 
 def _apply_common(
@@ -128,19 +132,65 @@ class OllamaClient:
         think: str | None = None,
         options: dict[str, Any] | None = None,
         keep_alive: str | None = None,
+        cancelled: Callable[[], bool] | None = None,
     ) -> str:
         payload: dict[str, Any] = {
             "model": model,
             "prompt": prompt,
-            "stream": False,
+            "stream": cancelled is not None,
         }
         if system:
             payload["system"] = system
         _apply_common(payload, think, options, keep_alive)
-        response = self._request("/api/generate", payload).get("response")
-        if not isinstance(response, str):
-            raise OllamaError("Ollama returned no generated response")
-        return response
+        if cancelled is None:
+            response = self._request("/api/generate", payload).get("response")
+            if not isinstance(response, str):
+                raise OllamaError("Ollama returned no generated response")
+            return response
+
+        if cancelled():
+            raise OllamaCancelled("request cancelled")
+        request = urllib.request.Request(
+            f"{self.host}/api/generate",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            method="POST",
+        )
+        chunks: list[str] = []
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                for raw_line in response:
+                    if cancelled():
+                        response.close()
+                        raise OllamaCancelled("request cancelled")
+                    line = raw_line.decode("utf-8").strip()
+                    if not line:
+                        continue
+                    try:
+                        item = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        raise OllamaError("Ollama returned invalid streaming JSON") from exc
+                    if not isinstance(item, dict):
+                        raise OllamaError("Ollama returned an unexpected streaming response")
+                    if item.get("error"):
+                        raise OllamaError(f"Ollama error: {item['error']}")
+                    piece = item.get("response")
+                    if isinstance(piece, str):
+                        chunks.append(piece)
+                    if item.get("done") is True:
+                        break
+        except OllamaCancelled:
+            raise
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace").strip()
+            suffix = f": {detail}" if detail else ""
+            raise OllamaError(f"Ollama returned HTTP {exc.code}{suffix}") from exc
+        except (urllib.error.URLError, TimeoutError, socket.timeout) as exc:
+            reason = getattr(exc, "reason", exc)
+            raise OllamaError(f"Cannot reach Ollama at {self.host}: {reason}") from exc
+        if cancelled():
+            raise OllamaCancelled("request cancelled")
+        return "".join(chunks)
 
     def chat(
         self,

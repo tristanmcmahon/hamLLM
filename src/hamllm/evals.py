@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+import statistics
 import time
 import unicodedata
 from dataclasses import dataclass, field
@@ -95,17 +96,48 @@ def add_tests(files: dict[str, str]) -> tuple[bool, str]:
 
 
 def rename_tests(files: dict[str, str]) -> tuple[bool, str]:
-    """Pass when greet() was renamed to welcome() in its definition and its caller."""
-    lib, main = files.get("greet.py", ""), files.get("main.py", "")
+    """Pass when greet() was structurally renamed to welcome() in both modules."""
+    try:
+        lib_tree = ast.parse(files.get("greet.py", ""))
+        main_tree = ast.parse(files.get("main.py", ""))
+    except SyntaxError as exc:
+        return False, f"FAILED: edited Python does not parse: {exc.msg}"
+
     problems = []
-    if not re.search(r"def welcome\(", lib) or re.search(r"def greet\(", lib):
+    lib_functions = {node.name for node in ast.walk(lib_tree) if isinstance(node, ast.FunctionDef)}
+    if "welcome" not in lib_functions or "greet" in lib_functions:
         problems.append("greet.py must define welcome() and no longer greet()")
-    if not re.search(r"\bwelcome\(", main) or re.search(r"(?<![.\w])greet\(", main):
+
+    imports_welcome = False
+    imports_module = False
+    imports_old = False
+    calls_welcome = False
+    calls_old = False
+    for node in ast.walk(main_tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "greet":
+            imported = {alias.name for alias in node.names}
+            imports_welcome |= "welcome" in imported
+            imports_old |= "greet" in imported
+        elif isinstance(node, ast.Import):
+            imports_module |= any(alias.name == "greet" for alias in node.names)
+        elif isinstance(node, ast.Call):
+            func = node.func
+            calls_welcome |= (
+                isinstance(func, ast.Name) and func.id == "welcome"
+            ) or (
+                isinstance(func, ast.Attribute)
+                and func.attr == "welcome"
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "greet"
+            )
+            calls_old |= isinstance(func, ast.Name) and func.id == "greet"
+
+    if not (imports_welcome or imports_module):
+        problems.append("main.py does not import welcome or the greet module")
+    if imports_old:
+        problems.append("main.py still imports greet() directly")
+    if not calls_welcome or calls_old:
         problems.append("main.py must call welcome(), not greet()")
-    if not re.search(r"from greet import[^\n]*\bwelcome\b|import greet", main):
-        problems.append("main.py does not import welcome")
-    if re.search(r"from greet import[^\n]*\bgreet\b", main):
-        problems.append("main.py still imports greet")
     return not problems, "1 passed" if not problems else "FAILED: " + "; ".join(problems)
 
 
@@ -122,6 +154,7 @@ class Sandbox:
         return ToolRegistry(
             schemas=TOOL_SCHEMAS,
             caller=self._call,
+            observational_tools=frozenset({"list_files", "read_file"}),
             mutating_tools=frozenset({"write_file"}),
             executing_tools=frozenset({"run_tests"}),
         )
@@ -526,6 +559,14 @@ def category_trials(summaries: list[CaseSummary]) -> dict[str, int]:
     return trials
 
 
+def category_median_seconds(summaries: list[CaseSummary]) -> dict[str, float]:
+    """Observed latency by capability category, using every run rather than case averages."""
+    seconds: dict[str, list[float]] = {}
+    for summary in summaries:
+        seconds.setdefault(summary.case.category, []).extend(run.seconds for run in summary.runs)
+    return {category: round(statistics.median(values), 2) for category, values in seconds.items() if values}
+
+
 def verdict(summaries: list[CaseSummary], threshold: float = DEFAULT_THRESHOLD) -> bool:
     return bool(summaries) and all(rate >= threshold for rate in category_rates(summaries).values())
 
@@ -537,14 +578,15 @@ def report(
     *,
     options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    medians = [s.median_seconds for s in summaries]
+    all_seconds = [run.seconds for summary in summaries for run in summary.runs]
     return {
         "model": model,
         "ready": verdict(summaries, threshold),
         "threshold": threshold,
         "repeats": len(summaries[0].runs) if summaries else 0,
         "num_ctx": (options or {}).get("num_ctx"),
-        "median_seconds": round(sum(medians) / len(medians), 2) if medians else None,
+        "median_seconds": round(statistics.median(all_seconds), 2) if all_seconds else None,
+        "category_median_seconds": category_median_seconds(summaries),
         "categories": category_rates(summaries),
         "trials": category_trials(summaries),
         "retries": sum(s.retries for s in summaries),

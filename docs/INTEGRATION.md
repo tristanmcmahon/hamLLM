@@ -39,9 +39,9 @@ Zed has a built-in Ollama provider (`language_models.ollama.api_url`, pointed at
 ### B. `hamllm mcp`: one stdio MCP server, three clients (implemented)
 Zed (`context_servers`), Claude Code (`claude mcp add`) and Codex (`mcp_servers` in its config) all speak MCP, so one dependency-free stdio server serves them all.
 
-`scripts/install.sh` adds or updates only Zed's `context_servers.hamllm` entry in user JSONC settings, keeping other servers (including a separately configured OpenClaw Gateway MCP server), comments and other settings. It backs up settings before each write and reverses only its own entry on `--uninstall`. The local command is PATH-resolved `hamllm mcp`; `HAMLLM_MCP_MODEL` chooses the registered alias and `HAMLLM_HOST` passes through if supplied. Zed loading the entry on a real installation remains to be checked.
+`scripts/install.sh` adds or updates only Zed's `context_servers.hamllm` entry in user JSONC settings, keeping other servers (including a separately configured OpenClaw Gateway MCP server), comments and other settings. It backs up settings before each write and reverses only its own entry on `--uninstall`. The local command is PATH-resolved `hamllm mcp`; `HAMLLM_MCP_MODEL` chooses the registered alias and `HAMLLM_HOST` passes through if supplied. Zed loading the entry was verified on Helix on 2026-11-09.
 
-Proposed tools, read-only by default:
+Implemented tools, read-only:
 
 - `ask_local(prompt, system?, model?)`: single generation for cheap work such as summaries, commit messages, classification and log triage.
 - `local_models()`: installed models plus the latest eval verdict per category.
@@ -86,19 +86,20 @@ Partly, depending on who decides:
 2. **A rule decides** (fully automatic, no model choice): shell hooks such as a git `prepare-commit-msg` calling `hamllm run --model fast`, or a log summariser. Only covers jobs named in advance.
 3. **A gateway routes every request** (not recommended): needs a judgement of "easy" before answering, silently degrades results when wrong, and small models struggle with large agent prompts.
 
-Recommended: 1 plus 2 for the few repetitive jobs. To know whether clients really offload, add a usage log (time, model, latency, counts, never prompts); not built yet.
+Recommended: 1 plus 2 for the few repetitive jobs. Set `HAMLLM_USAGE_LOG` to opt into JSONL usage metadata (time, model, latency, character counts, status; never prompts or answers) and measure whether clients actually offload.
 
 ## Status of the prerequisites
 
-1. **Context control: done.** `options` and `keep_alive` pass through `OllamaClient`; `AgentRuntime(options=...)` forwards them only when set, so older fake clients keep working. hamLLM defaults to a 16k window instead of Ollama's silent 4k.
-2. **Streaming: open.** All calls are `stream: false`; ACP and editor UIs would want incremental output.
-3. **Approver errors: done.** An approver that raises is treated as a denial (default-deny holds even if the approval UI crashes).
-4. **Boundaries: held.** The MCP server is stdio-only, read-only, and talks only to the configured Ollama host. It also refuses prompts that overflow the window and models that were never profiled, so a calling agent cannot trigger a surprise model load.
+1. **Context control: done.** `options` and keep-alive pass through `OllamaClient`; hamLLM defaults to a 16k window and MCP reserves space for requested output rather than allowing silent truncation.
+2. **Cancellation transport: done.** MCP GPU work is serialized through one worker. Cancellable Ollama generations use the streaming HTTP response internally so a cancellation notification can close the request; client-facing tool results are still returned as complete values, not incrementally streamed.
+3. **Approver errors and tool classification: done.** An approver that raises is a denial, and every declared agent tool must be explicitly classified observational/mutating/executing with no overlap.
+4. **Boundaries: held.** The MCP server is stdio-only, read-only, and talks only to the configured Ollama host. Aliases require current qualifying profiles; non-default explicit tags require a current fully-ready profile. The configured default remains an operator-controlled escape hatch.
+5. **Performance measurement: done.** Profiles record true overall and per-category median latency, alias tie-breaking uses only relevant categories, MCP keep-alive defaults to 5m, and optional prompt-free usage telemetry is available.
 
 Evals deliberately leave temperature at the model default, so `--repeats` measures realistic variance.
 
 ## Suggested order
 
 1. Run `hamllm eval --save --repeats 3` on each model Helix serves.
-2. Run `scripts/install.sh` to register `hamllm mcp` in the available Zed, Claude Code and Codex clients; verify Zed's connection after restart.
+2. Run `scripts/install.sh` to register `hamllm mcp` in the available Zed, Claude Code and Codex clients. Zed and Claude Code are verified on Helix; restart an existing session after registration changes.
 3. Revisit C (`hamllm acp`) once there is real usage, and add streaming then.
