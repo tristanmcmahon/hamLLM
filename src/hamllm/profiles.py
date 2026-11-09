@@ -48,6 +48,11 @@ def _valid_profile(profile: Any) -> bool:
         isinstance(name, str) and _valid_rate(rate) for name, rate in categories.items()
     ):
         return False
+    repeats = profile.get("repeats")
+    if repeats is not None and (
+        isinstance(repeats, bool) or not isinstance(repeats, int) or repeats < 1
+    ):
+        return False
     trials = profile.get("trials")
     if trials is not None and (
         not isinstance(trials, dict)
@@ -140,7 +145,7 @@ def save_report(report: dict[str, Any], path: Path | None = None, *, digest: str
 
 def qualifies(profile: dict[str, Any], required: tuple[str, ...], threshold: float) -> bool:
     rates = profile.get("categories") or {}
-    return all(rates.get(category, 0.0) >= threshold for category in required)
+    return all(category in rates and rates[category] >= threshold for category in required)
 
 
 def _lower_bound(rate: float, trials: int, z: float = 1.2816) -> float:
