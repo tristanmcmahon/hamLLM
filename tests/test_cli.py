@@ -133,3 +133,12 @@ class EnvironmentValidationTests(unittest.TestCase):
                 "os.environ", {"HAMLLM_MCP_TIMEOUT": value}, clear=False
             ), self.assertRaises(SystemExit):
                 cli.main(["mcp"])
+
+
+class TimeoutPrecedenceTests(unittest.TestCase):
+    def test_explicit_mcp_timeout_overrides_invalid_environment(self):
+        with patch.dict("os.environ", {"HAMLLM_MCP_TIMEOUT": "garbage"}, clear=False), patch(
+            "hamllm.cli.OllamaClient"
+        ) as client_type, patch("hamllm.mcp.serve", return_value=0):
+            self.assertEqual(cli.main(["mcp", "--timeout", "9"]), 0)
+        self.assertEqual(client_type.call_args.args[1], 9.0)
