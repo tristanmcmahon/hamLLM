@@ -95,3 +95,36 @@ def test_ranking_weighs_evidence_not_just_the_rate():
 def test_old_profiles_without_trials_still_rank():
     old = {"categories": {"tools": 1.0, "safety": 1.0, "coding": 1.0}, "repeats": 3, "median_seconds": 1.0}
     assert resolve("code", ["old"], {"old": old}) == "old"
+
+
+def test_load_drops_semantically_invalid_profiles(tmp_path):
+    path = tmp_path / "profiles.json"
+    path.write_text(json.dumps({
+        "good": GOOD,
+        "string": "oops",
+        "bad-rate": {"categories": {"basic": 2.0}},
+        "bad-trials": {"categories": {"basic": 1.0}, "trials": {"basic": -1}},
+        "bad-latency": {"categories": {"basic": 1.0}, "category_median_seconds": {"basic": "fast"}},
+    }))
+    loaded = profiles.load(path)
+    assert set(loaded) == {"good"}
+
+
+def test_alias_speed_tiebreak_uses_only_required_categories():
+    slow_fast_work = {
+        "categories": {"basic": 1.0, "instruction": 1.0, "coding": 1.0},
+        "trials": {"basic": 20, "instruction": 20, "coding": 20},
+        "category_median_seconds": {"basic": 1.0, "instruction": 1.0, "coding": 100.0},
+        "median_seconds": 50.0,
+    }
+    quick_coding_but_slower_fast_work = {
+        "categories": {"basic": 1.0, "instruction": 1.0, "coding": 1.0},
+        "trials": {"basic": 20, "instruction": 20, "coding": 20},
+        "category_median_seconds": {"basic": 2.0, "instruction": 2.0, "coding": 1.0},
+        "median_seconds": 1.5,
+    }
+    assert resolve(
+        "fast",
+        ["a", "b"],
+        {"a": slow_fast_work, "b": quick_coding_but_slower_fast_work},
+    ) == "a"
