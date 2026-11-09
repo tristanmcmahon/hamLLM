@@ -330,7 +330,7 @@ def build_parser() -> argparse.ArgumentParser:
         "resolve", parents=[common], help="print the installed model an alias resolves to"
     )
     resolve.add_argument("name", help="tag or alias: " + ", ".join([profiles.DEFAULT_ALIAS, *profiles.ALIASES]))
-    resolve.add_argument("--threshold", type=float, default=profiles.DEFAULT_THRESHOLD)
+    resolve.add_argument("--threshold", type=_probability, default=profiles.DEFAULT_THRESHOLD)
     resolve.set_defaults(handler=resolve_model)
 
     serve = commands.add_parser(
