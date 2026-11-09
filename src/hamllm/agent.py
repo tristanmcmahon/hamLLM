@@ -24,12 +24,39 @@ def allow_all_responses(_: str) -> tuple[str, ...]:
 class ToolRegistry:
     schemas: list[dict[str, Any]] = field(default_factory=list)
     caller: Callable[..., str] | None = None
+    observational_tools: frozenset[str] = frozenset()
     mutating_tools: frozenset[str] = frozenset()
     executing_tools: frozenset[str] = frozenset()
 
     @property
     def approval_required_tools(self) -> frozenset[str]:
         return self.mutating_tools | self.executing_tools
+
+    @property
+    def classified_tools(self) -> frozenset[str]:
+        return self.observational_tools | self.mutating_tools | self.executing_tools
+
+    @property
+    def declared_tools(self) -> frozenset[str]:
+        names: set[str] = set()
+        for schema in self.schemas:
+            function = schema.get("function") if isinstance(schema, dict) else None
+            name = function.get("name") if isinstance(function, dict) else None
+            if isinstance(name, str) and name:
+                names.add(name)
+        return frozenset(names)
+
+    def validate_classification(self) -> None:
+        overlaps = (
+            (self.observational_tools & self.mutating_tools)
+            | (self.observational_tools & self.executing_tools)
+            | (self.mutating_tools & self.executing_tools)
+        )
+        if overlaps:
+            raise ValueError("tools have conflicting classifications: " + ", ".join(sorted(overlaps)))
+        unclassified = self.declared_tools - self.classified_tools
+        if unclassified:
+            raise ValueError("declared tools are unclassified: " + ", ".join(sorted(unclassified)))
 
     def call_tool(self, name: str, arguments: dict[str, Any], *, allow_mutation: bool = False) -> str:
         if self.caller is None:
@@ -149,6 +176,7 @@ class AgentRuntime:
         *,
         approver: ToolApprover | None = None,
     ) -> str:
+        self.tools.validate_classification()
         seen_observations: set[str] = set()
         seen_mutations: set[str] = set()
         seen_executions: set[str] = set()
@@ -198,13 +226,14 @@ class AgentRuntime:
                                     seen_observations.clear()
                             else:
                                 result = json.dumps({"ok": False, "error": "action was not approved by the user"})
-                    elif name in self.tools.approval_required_tools:
-                        result = json.dumps({"ok": False, "error": "approval-required tool was not classified by the runtime"})
-                    elif signature in seen_observations:
-                        result = json.dumps({"ok": False, "error": "duplicate tool call in the current workspace state; the previous result is already in context"})
+                    elif name in self.tools.observational_tools:
+                        if signature in seen_observations:
+                            result = json.dumps({"ok": False, "error": "duplicate tool call in the current workspace state; the previous result is already in context"})
+                        else:
+                            seen_observations.add(signature)
+                            result = self.tools.call_tool(name, arguments)
                     else:
-                        seen_observations.add(signature)
-                        result = self.tools.call_tool(name, arguments)
+                        result = json.dumps({"ok": False, "error": f"tool is not classified by the runtime: {name}"})
 
                 messages.append({"role": "tool", "tool_name": name, "content": result})
 
