@@ -217,6 +217,11 @@ class Server:
                     f"{model}'s profile is stale because its weights changed; re-run "
                     f"`hamllm eval --save --model {model}`"
                 )
+            if profiles.is_outdated(profile):
+                raise profiles.ResolutionError(
+                    f"{model}'s profile was produced by an older eval suite; re-run "
+                    f"`hamllm eval --save --model {model}`"
+                )
             if profile.get("ready") is not True:
                 raise profiles.ResolutionError(
                     f"{model} did not pass its saved capability eval and is not offered by explicit tag over MCP"
@@ -275,7 +280,7 @@ class Server:
         profiled = [m for m in installed if m in saved]
         profiled.sort(
             key=lambda m: (
-                profiles.is_stale(saved[m], digests[m]),
+                profiles.is_stale(saved[m], digests[m]) or profiles.is_outdated(saved[m]),
                 not saved[m].get("ready"),
                 saved[m].get("median_seconds") or 1e9,
                 m,
@@ -283,7 +288,15 @@ class Server:
         )
         for model in profiled:
             profile = saved[model]
-            state = "STALE" if profiles.is_stale(profile, digests[model]) else ("ready" if profile.get("ready") else "not ready")
+            state = (
+                "STALE"
+                if profiles.is_stale(profile, digests[model])
+                else "OUTDATED"
+                if profiles.is_outdated(profile)
+                else "ready"
+                if profile.get("ready")
+                else "not ready"
+            )
             rates = " ".join(f"{c} {round(r * 100)}" for c, r in (profile.get("categories") or {}).items())
             median = profile.get("median_seconds")
             lines.append(f"{model}: {state}; {rates}; median {median}s" if median else f"{model}: {state}; {rates}")
