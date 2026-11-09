@@ -30,9 +30,9 @@ The goal is fewer duplicated runtimes without turning unrelated applications int
 
 `hamLLM` owns dependency-free Ollama transport plus `run`, `models`, `doctor`, `eval`, `resolve` and `mcp`. The interactive `chat` command was removed in 0.2.0 as a duplicate of `ollama run`. The historical Gmail/OAuth/mail-poller implementation is removed rather than preserved as a second integration path.
 
-### Capability layer (0.2.0)
+### Capability layer (0.2.1)
 
-`hamllm eval --save` records per-category pass rates per model; aliases (`fast`, `tools`, `code`) resolve only to installed models that passed; `hamllm mcp` exposes read-only `ask_local` and `local_models` to Zed, Claude Code and Codex with a fixed context window, output cap and keep-alive. `hamllm.agent` and `hamllm.ollama` keep their import paths for Gwen's pinned submodule.
+`hamllm eval --save` records per-category pass rates and latency per model; aliases (`fast`, `tools`, `code`) resolve only to installed models that passed and use only relevant-category latency as the speed tie-break. `hamllm mcp` exposes read-only `ask_local` and `local_models` to Zed, Claude Code and Codex with a fixed context window, output cap, serialized cancellable GPU work and a shorter MCP-specific keep-alive. `hamllm.agent` and `hamllm.ollama` keep their import paths for Gwen's pinned submodule.
 
 ### Bounded agent core
 
@@ -40,6 +40,7 @@ The goal is fewer duplicated runtimes without turning unrelated applications int
 
 - bounded tool rounds;
 - duplicate observation/mutation/execution suppression;
+- explicit observational/mutating/executing tool classification, failing closed on missing or conflicting classifications;
 - default-deny approval handling;
 - state-change cache invalidation;
 - deterministic response-policy rewriting;
