@@ -106,6 +106,7 @@ def test_load_drops_semantically_invalid_profiles(tmp_path):
         "string": "oops",
         "bad-rate": {"categories": {"basic": 2.0}},
         "bad-trials": {"categories": {"basic": 1.0}, "trials": {"basic": -1}},
+        "bad-repeats": {"categories": {"basic": 1.0}, "repeats": "five"},
         "bad-latency": {"categories": {"basic": 1.0}, "category_median_seconds": {"basic": "fast"}},
     }))
     loaded = profiles.load(path)
@@ -140,3 +141,13 @@ def test_older_eval_suite_profiles_do_not_route():
         resolve("code", ["a"], {"a": old})
     assert profiles.is_outdated(old)
     assert not profiles.is_outdated(GOOD)
+
+
+def test_zero_threshold_does_not_make_missing_categories_qualify():
+    partial = {
+        "suite_version": profiles.PROFILE_SUITE_VERSION,
+        "categories": {"tools": 1.0},
+        "median_seconds": 1.0,
+    }
+    with pytest.raises(ResolutionError):
+        resolve("code", ["partial"], {"partial": partial}, threshold=0.0)
