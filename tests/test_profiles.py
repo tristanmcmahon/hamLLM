@@ -7,7 +7,7 @@ from hamllm.profiles import ResolutionError, resolve
 
 GOOD = {"suite_version": profiles.PROFILE_SUITE_VERSION, "categories": {"basic": 1.0, "instruction": 1.0, "tools": 1.0, "safety": 1.0, "coding": 1.0}, "median_seconds": 9.0}
 FAST_GOOD = {**GOOD, "median_seconds": 2.0}
-NO_CODE = {"categories": {"basic": 1.0, "instruction": 1.0, "tools": 1.0, "safety": 1.0, "coding": 0.0}, "median_seconds": 1.0}
+NO_CODE = {"suite_version": profiles.PROFILE_SUITE_VERSION, "categories": {"basic": 1.0, "instruction": 1.0, "tools": 1.0, "safety": 1.0, "coding": 0.0}, "median_seconds": 1.0}
 
 
 def test_installed_tag_resolves_to_itself_even_unprofiled():
@@ -22,8 +22,8 @@ def test_alias_picks_best_qualifying_model_then_fastest():
 
 def test_alias_ranks_by_score_before_speed():
     saved = {
-        "slow-strong": {"categories": {"basic": 1.0, "instruction": 1.0}, "median_seconds": 30.0},
-        "fast-weak": {"categories": {"basic": 0.8, "instruction": 0.8}, "median_seconds": 1.0},
+        "slow-strong": {"suite_version": profiles.PROFILE_SUITE_VERSION, "categories": {"basic": 1.0, "instruction": 1.0}, "median_seconds": 30.0},
+        "fast-weak": {"suite_version": profiles.PROFILE_SUITE_VERSION, "categories": {"basic": 0.8, "instruction": 0.8}, "median_seconds": 1.0},
     }
     assert resolve("fast", ["slow-strong", "fast-weak"], saved) == "slow-strong"
 
@@ -86,11 +86,11 @@ def test_save_report_records_digest(tmp_path):
 
 
 def test_ranking_weighs_evidence_not_just_the_rate():
-    thin = {"categories": {"tools": 1.0, "safety": 1.0, "coding": 1.0}, "trials": {"tools": 9, "safety": 9, "coding": 9}, "median_seconds": 1.0}
-    solid = {"categories": {"tools": 1.0, "safety": 1.0, "coding": 1.0}, "trials": {"tools": 25, "safety": 20, "coding": 10}, "median_seconds": 9.0}
+    thin = {"suite_version": profiles.PROFILE_SUITE_VERSION, "categories": {"tools": 1.0, "safety": 1.0, "coding": 1.0}, "trials": {"tools": 9, "safety": 9, "coding": 9}, "median_seconds": 1.0}
+    solid = {"suite_version": profiles.PROFILE_SUITE_VERSION, "categories": {"tools": 1.0, "safety": 1.0, "coding": 1.0}, "trials": {"tools": 25, "safety": 20, "coding": 10}, "median_seconds": 9.0}
     assert resolve("code", ["thin", "solid"], {"thin": thin, "solid": solid}) == "solid"
     lucky = {**thin, "trials": {"tools": 3, "safety": 3, "coding": 3}}
-    steady = {"categories": {"tools": 0.97, "safety": 0.97, "coding": 0.97}, "trials": {"tools": 100, "safety": 100, "coding": 100}, "median_seconds": 9.0}
+    steady = {"suite_version": profiles.PROFILE_SUITE_VERSION, "categories": {"tools": 0.97, "safety": 0.97, "coding": 0.97}, "trials": {"tools": 100, "safety": 100, "coding": 100}, "median_seconds": 9.0}
     assert resolve("code", ["lucky", "steady"], {"lucky": lucky, "steady": steady}) == "steady"
 
 
@@ -114,12 +114,14 @@ def test_load_drops_semantically_invalid_profiles(tmp_path):
 
 def test_alias_speed_tiebreak_uses_only_required_categories():
     slow_fast_work = {
+        "suite_version": profiles.PROFILE_SUITE_VERSION,
         "categories": {"basic": 1.0, "instruction": 1.0, "coding": 1.0},
         "trials": {"basic": 20, "instruction": 20, "coding": 20},
         "category_median_seconds": {"basic": 1.0, "instruction": 1.0, "coding": 100.0},
         "median_seconds": 50.0,
     }
     quick_coding_but_slower_fast_work = {
+        "suite_version": profiles.PROFILE_SUITE_VERSION,
         "categories": {"basic": 1.0, "instruction": 1.0, "coding": 1.0},
         "trials": {"basic": 20, "instruction": 20, "coding": 20},
         "category_median_seconds": {"basic": 2.0, "instruction": 2.0, "coding": 1.0},
