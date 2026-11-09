@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from typing import Sequence
@@ -27,9 +28,22 @@ def _positive_float(value: str) -> float:
     try:
         parsed = float(value)
     except ValueError as exc:
-        raise argparse.ArgumentTypeError("must be a positive number") from exc
-    if parsed <= 0:
-        raise argparse.ArgumentTypeError("must be a positive number")
+        raise argparse.ArgumentTypeError("must be a positive finite number") from exc
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive finite number")
+    return parsed
+
+
+def _environment_positive_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        parsed = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive finite number") from exc
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise ValueError(f"{name} must be a positive finite number")
     return parsed
 
 
@@ -46,7 +60,9 @@ def _probability(value: str) -> float:
 def _client(args: argparse.Namespace, *, default_timeout: float | None = None) -> OllamaClient:
     timeout = args.timeout
     if timeout is None:
-        timeout = default_timeout or float(os.environ.get("HAMLLM_TIMEOUT") or DEFAULT_TIMEOUT_SECONDS)
+        timeout = default_timeout if default_timeout is not None else _environment_positive_float(
+            "HAMLLM_TIMEOUT", DEFAULT_TIMEOUT_SECONDS
+        )
     return OllamaClient(args.host, timeout)
 
 
@@ -250,7 +266,7 @@ def evaluate(args: argparse.Namespace) -> int:
 def mcp_server(args: argparse.Namespace) -> int:
     from .mcp import Server, serve
 
-    mcp_timeout = float(os.environ.get("HAMLLM_MCP_TIMEOUT") or MCP_TIMEOUT_SECONDS)
+    mcp_timeout = _environment_positive_float("HAMLLM_MCP_TIMEOUT", MCP_TIMEOUT_SECONDS)
     return serve(
         Server(
             _client(args, default_timeout=mcp_timeout),
