@@ -54,7 +54,6 @@ BIN="$PREFIX/bin/hamllm"
 ZED_SETTINGS="${XDG_CONFIG_HOME:-$HOME/.config}/zed/settings.json"
 BEGIN_MARK="<!-- hamllm:begin -->"
 END_MARK="<!-- hamllm:end -->"
-INSTRUCTION_FILES=("$HOME/.claude/CLAUDE.md" "$HOME/.codex/AGENTS.md")
 
 say() { printf '%s\n' "$*"; }
 run() { printf '+ %s\n' "$*"; [ "$DRY" = 1 ] || "$@"; }
@@ -111,14 +110,24 @@ if [ "$UNINSTALL" = 1 ]; then
   fi
   have claude && wants claude && { run claude mcp remove --scope user hamllm || true; }
   have codex && wants codex && { run codex mcp remove hamllm || true; }
-  for f in "${INSTRUCTION_FILES[@]}"; do
+
+  if [ -z "$ONLY" ] || [ "$ONLY" = claude ]; then
+    f="$HOME/.claude/CLAUDE.md"
     [ -f "$f" ] && grep -qF "$BEGIN_MARK" "$f" && { say "+ remove hamllm block from $f"; [ "$DRY" = 1 ] || edit_block "$f" remove; }
-  done
-  run rm -f "$BIN"
-  say "Uninstalled. Profiles remain in \${HAMLLM_STATE_DIR:-~/.local/state/hamllm} (delete by hand if unwanted)."
+  fi
+  if [ -z "$ONLY" ] || [ "$ONLY" = codex ]; then
+    f="$HOME/.codex/AGENTS.md"
+    [ -f "$f" ] && grep -qF "$BEGIN_MARK" "$f" && { say "+ remove hamllm block from $f"; [ "$DRY" = 1 ] || edit_block "$f" remove; }
+  fi
+
+  if [ -z "$ONLY" ]; then
+    run rm -f "$BIN"
+  else
+    say "Kept shared launcher $BIN; another client may still use it."
+  fi
+  say "Uninstalled selected integration(s). Profiles remain in ${HAMLLM_STATE_DIR:-~/.local/state/hamllm}."
   exit 0
 fi
-
 # 1. launcher: runs this checkout, so `git pull` is the whole upgrade story
 say "== launcher: $BIN (runs $REPO/src)"
 if [ "$DRY" = 1 ]; then
