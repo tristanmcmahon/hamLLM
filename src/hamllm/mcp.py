@@ -356,8 +356,10 @@ def serve(server: Server, stdin: TextIO | None = None, stdout: TextIO | None = N
             finally:
                 with pending_lock:
                     pending.pop(key, None)
-            write(response)
-            work.task_done()
+            try:
+                write(response)
+            finally:
+                work.task_done()
 
     worker_thread = threading.Thread(target=worker, name="hamllm-mcp-worker", daemon=True)
     worker_thread.start()
@@ -373,8 +375,9 @@ def serve(server: Server, stdin: TextIO | None = None, stdout: TextIO | None = N
 
         if isinstance(message, dict) and message.get("method") == "notifications/cancelled":
             params = message.get("params")
-            request_id = params.get("requestId") if isinstance(params, dict) else None
-            key = _request_key(request_id)
+            if not isinstance(params, dict) or "requestId" not in params:
+                continue
+            key = _request_key(params["requestId"])
             with pending_lock:
                 event = pending.get(key)
             if event is not None:
