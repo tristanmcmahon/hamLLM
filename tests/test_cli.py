@@ -46,7 +46,8 @@ class DoctorAliasTests(unittest.TestCase):
         client = client_type.return_value
         client.version.return_value = "0.11.0"
         client.installed.return_value = {"gemma4:12b": "sha"}
-        load.return_value = {"gemma4:12b": {"ready": True, "digest": "sha", "evaluated_at": "t",
+        load.return_value = {"gemma4:12b": {"suite_version": cli.profiles.PROFILE_SUITE_VERSION,
+                                           "ready": True, "digest": "sha", "evaluated_at": "t",
                                            "categories": {"tools": 1.0, "safety": 1.0, "coding": 1.0}}}
         output = io.StringIO()
         with redirect_stdout(output):
