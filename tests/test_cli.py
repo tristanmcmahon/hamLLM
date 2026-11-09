@@ -79,3 +79,36 @@ class TimeoutDefaultTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ValidationTests(unittest.TestCase):
+    def test_numeric_cli_limits_reject_invalid_values(self):
+        for argv in (
+            ["run", "--num-ctx", "0", "x"],
+            ["run", "--timeout", "0", "x"],
+            ["eval", "--repeats", "0"],
+            ["eval", "--threshold", "1.1"],
+            ["resolve", "fast", "--threshold", "-0.1"],
+        ):
+            with self.subTest(argv=argv), self.assertRaises(SystemExit):
+                cli.main(argv)
+
+    @patch("hamllm.cli.OllamaClient")
+    def test_bad_context_environment_fails_cleanly(self, client_type):
+        client_type.return_value.installed.return_value = {"gpt-oss:20b": "sha"}
+        with patch.dict("os.environ", {"HAMLLM_NUM_CTX": "bogus"}, clear=False):
+            with self.assertRaises(SystemExit):
+                cli.main(["run", "hello"])
+
+    @patch("hamllm.mcp.serve", return_value=0)
+    @patch("hamllm.cli.OllamaClient")
+    def test_mcp_uses_shorter_keepalive_and_usage_log_from_environment(self, client_type, serve):
+        with patch.dict(
+            "os.environ",
+            {"HAMLLM_MCP_KEEP_ALIVE": "7m", "HAMLLM_USAGE_LOG": "/tmp/hamllm-usage-test.jsonl"},
+            clear=False,
+        ):
+            self.assertEqual(cli.main(["mcp"]), 0)
+        server = serve.call_args.args[0]
+        self.assertEqual(server.keep_alive, "7m")
+        self.assertEqual(str(server.usage_log), "/tmp/hamllm-usage-test.jsonl")
